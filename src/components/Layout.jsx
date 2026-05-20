@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 
 export default function Layout() {
-  const { profile, signOut, isCEO, isManagement } = useAuth()
+  const { profile, signOut, isCEO, isManagement, isOps } = useAuth()
   const { theme, toggle } = useTheme()
   const navigate = useNavigate()
   const location = useLocation()
@@ -105,7 +105,11 @@ export default function Layout() {
               <NavLink to="/analytics" className={nl}>
                 <BarChart3 size={17} /> <span>Analytics</span>
               </NavLink>
+            </>
+          )}
 
+          {(isManagement || isOps) && (
+            <>
               <p className="nav-section-label">Clients</p>
               <NavLink to="/client-roster" className={nl}>
                 <Users size={17} /> <span>Client Roster</span>
