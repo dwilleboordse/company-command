@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { Plus, Trash2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react'
 
-// Week helpers (same as SpendTracker)
+// Week helpers (timezone-safe; weeks are Monday→Sunday)
 function getMondayOfWeek(d) {
   const day=d.getDay(); const diff=day===0?-6:1-day
   const m=new Date(d); m.setDate(m.getDate()+diff); m.setHours(0,0,0,0); return m
@@ -13,21 +13,29 @@ function getLastMonday() {
   const diff=day===0?13:day+6; d.setDate(d.getDate()-diff); d.setHours(0,0,0,0); return d
 }
 function addWeeks(d,n) { const r=new Date(d); r.setDate(r.getDate()+n*7); return r }
-function toDateStr(d) { return d.toISOString().split('T')[0] }
+// Build YYYY-MM-DD from local components — avoids UTC shift that turns Monday into Sunday
+function toDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+}
+// Parse YYYY-MM-DD as a local-time Date (not UTC midnight)
+function parseISODate(str) {
+  const [y,m,d] = str.split('-').map(Number)
+  return new Date(y, m-1, d)
+}
 function getSundayStr(mondayStr) {
-  const d=new Date(mondayStr); d.setDate(d.getDate()+6); return toDateStr(d)
+  const d=parseISODate(mondayStr); d.setDate(d.getDate()+6); return toDateStr(d)
 }
 function isCurrentOrFutureWeek(dateStr) {
   const monday=getMondayOfWeek(new Date())
   return dateStr >= toDateStr(monday)
 }
 function weekLabel2(mondayStr) {
-  const start=new Date(mondayStr); const end=new Date(mondayStr); end.setDate(end.getDate()+6)
+  const start=parseISODate(mondayStr); const end=parseISODate(mondayStr); end.setDate(end.getDate()+6)
   const fmt=(d)=>`${d.toLocaleString('default',{month:'short'})} ${d.getDate()}`
   return `${fmt(start)} – ${fmt(end)}`
 }
 function weekNum2(mondayStr) {
-  const d=new Date(mondayStr)
+  const d=parseISODate(mondayStr)
   const jan1=new Date(d.getFullYear(),0,1)
   return Math.ceil(((d-jan1)/86400000+jan1.getDay()+1)/7)
 }
@@ -36,9 +44,13 @@ const PLATFORMS = ['Meta','TikTok','AppLovin','Google']
 const PLATFORM_COLORS = { Meta:'#3b82f6', TikTok:'#f43f5e', AppLovin:'#8b5cf6', Google:'#22c55e' }
 
 const CHANGE_TYPES = [
-  'Budget Increase','Budget Decrease','Campaign Launch','Campaign Paused',
-  'Audience Change','Creative Swap','Bid Strategy Change','CBO/ABO Switch',
-  'Ad Set Change','Scaling','Testing','Other'
+  'Budget Increase',
+  'Budget Decrease',
+  'Campaign Launch',
+  'Campaign Paused',
+  'Creative Launched',
+  'Bid Strategy Change',
+  'Ad Set Change',
 ]
 
 // Safe date parser — avoids UTC midnight timezone shift
@@ -238,12 +250,12 @@ export default function ChangeLog() {
     }
     return {from:'2000-01-01',to:'9999-12-31'}
   }
-  function prevWeek() { setSelectedWeek(w=>toDateStr(addWeeks(new Date(w),-1))) }
+  function prevWeek() { setSelectedWeek(w=>toDateStr(addWeeks(parseISODate(w),-1))) }
   function nextWeek() {
-    const next=toDateStr(addWeeks(new Date(selectedWeek),1))
+    const next=toDateStr(addWeeks(parseISODate(selectedWeek),1))
     if (!isCurrentOrFutureWeek(next)) setSelectedWeek(next)
   }
-  const canGoNext = !isCurrentOrFutureWeek(toDateStr(addWeeks(new Date(selectedWeek),1)))
+  const canGoNext = !isCurrentOrFutureWeek(toDateStr(addWeeks(parseISODate(selectedWeek),1)))
   const isLastWeek = selectedWeek===toDateStr(getLastMonday())
 
   const {from,to} = getDateRange()
