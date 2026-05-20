@@ -62,10 +62,11 @@ export function AuthProvider({ children }) {
 
   const isCEO = profile?.role === 'ceo'
   const isManagement = profile?.role === 'management' || isCEO
+  const isOps = ['ops_manager', 'ops_assistant'].includes(profile?.position)
   const canSeeFinancials = isCEO
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signIn, signOut, isCEO, isManagement, canSeeFinancials }}>
+    <AuthContext.Provider value={{ user, profile, loading, signIn, signOut, isCEO, isManagement, isOps, canSeeFinancials }}>
       {children}
     </AuthContext.Provider>
   )
