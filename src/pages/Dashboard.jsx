@@ -39,7 +39,7 @@ function currentQuarter() {
 }
 
 export default function Dashboard() {
-  const { profile, isCEO, isManagement } = useAuth()
+  const { profile, isCEO, isManagement, isOps } = useAuth()
   const [objectives, setObjectives] = useState([])
   const [keyResults, setKeyResults] = useState([])
   const [krValues, setKrValues] = useState([])
@@ -113,7 +113,7 @@ export default function Dashboard() {
       try {
         let clientQ = supabase.from('clients').select('id,name,cs_ids,mb_ids,editor_ids,designer_ids,ugc_ids,assigned_cs_id')
           .eq('is_active',true).order('name')
-        if (!isManagement && profile?.id) {
+        if (!isManagement && !isOps && profile?.id) {
           clientQ = clientQ.contains('cs_ids', [profile.id])
         }
         const {data:allClients}=await clientQ

@@ -341,7 +341,7 @@ function ClientRow({ client, entries, selectedWeek, onLog }) {
 
 // ── MAIN PAGE ─────────────────────────────────────────────────
 export default function SpendTracker() {
-  const { profile, isManagement } = useAuth()
+  const { profile, isManagement, isOps } = useAuth()
   const [clients, setClients]   = useState([])
   const [members, setMembers]   = useState([])
   const [entries, setEntries]   = useState({})
@@ -584,7 +584,7 @@ export default function SpendTracker() {
             {[{k:'all',l:'All'},{k:'unlogged',l:'⬜ Not Logged'},{k:'atrisk',l:'🔴 At Risk'},{k:'healthy',l:'🟡 Healthy'},{k:'excellent',l:'🟢 Excellent'}]
               .map(f=><button key={f.k} className={`tab ${statusFilter===f.k?'active':''}`} onClick={()=>setStatusFilter(f.k)}>{f.l}</button>)}
           </div>
-          {isManagement && (
+          {(isManagement || isOps) && (
             <select value={csFilter} onChange={e=>setCsFilter(e.target.value)} style={{width:'auto',fontSize:12}}>
               <option value="all">All CS</option>
               {csMembers.map(m=><option key={m.id} value={m.id}>{m.full_name}</option>)}
