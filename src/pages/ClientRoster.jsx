@@ -468,7 +468,7 @@ function ClientTableRow({ client, allMembers, onEdit, onArchive }) {
 
 // ── MAIN PAGE ────────────────────────────────────────────────
 export default function ClientRoster() {
-  const { isManagement } = useAuth()
+  const { isManagement, isOps } = useAuth()
   const [clients, setClients] = useState([])
   const [allMembers, setAllMembers] = useState([])
   const [loading, setLoading] = useState(true)
@@ -502,7 +502,7 @@ export default function ClientRoster() {
     setClients(prev=>prev.map(c=>c.id===client.id?{...c,is_archived:false}:c))
   }
 
-  if (!isManagement) return (
+  if (!isManagement && !isOps) return (
     <div className="page-body" style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'60vh'}}>
       <p style={{color:'var(--text-muted)'}}>Management access only.</p>
     </div>

@@ -224,7 +224,7 @@ function MemberCard({ member, latestReview, history }) {
 }
 
 export default function TeamHealth() {
-  const { isManagement } = useAuth()
+  const { isManagement, isOps } = useAuth()
   const [members, setMembers] = useState([])
   const [reviews, setReviews] = useState({})
   const [loading, setLoading] = useState(true)
@@ -245,7 +245,7 @@ export default function TeamHealth() {
     setLoading(false)
   }
 
-  if (!isManagement) return <div className="page-body" style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'60vh'}}><p className="text-muted">Management access only.</p></div>
+  if (!isManagement && !isOps) return <div className="page-body" style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'60vh'}}><p className="text-muted">Management access only.</p></div>
 
   const withReviews=members.filter(m=>reviews[m.id]?.length>0)
   const highRisk=withReviews.filter(m=>['High','Critical'].includes(reviews[m.id]?.[0]?.performance_risk)).length
@@ -267,7 +267,7 @@ export default function TeamHealth() {
   return (
     <>
       <div className="page-header">
-        <div><h1 className="page-title">Team Health</h1><p className="page-subtitle">Weekly performance reviews — management only</p></div>
+        <div><h1 className="page-title">Team Health</h1><p className="page-subtitle">Weekly performance reviews</p></div>
       </div>
       <div className="page-body">
         <div className="stat-row">

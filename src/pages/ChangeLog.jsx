@@ -165,7 +165,8 @@ function LogRow({ entry, clientMap, memberMap, canDelete, onDelete }) {
 }
 
 export default function ChangeLog() {
-  const { profile, isManagement } = useAuth()
+  const { profile, isManagement, isOps } = useAuth()
+  const canSeeAll = isManagement || isOps
   const [logs, setLogs] = useState([])
   const [clients, setClients] = useState([])
   const [members, setMembers] = useState([])
@@ -189,7 +190,7 @@ export default function ChangeLog() {
       (() => {
         let q = supabase.from('clients').select('id,name,cs_ids,mb_ids,editor_ids,designer_ids,ugc_ids,assigned_cs_id,channels,is_archived')
           .eq('is_active',true).order('name')
-        if (!isManagement && profile?.id) {
+        if (!canSeeAll && profile?.id) {
           q = q.or(`cs_ids.cs.["${profile.id}"],mb_ids.cs.["${profile.id}"],assigned_cs_id.eq.${profile.id}`)
         }
         return q
@@ -199,7 +200,7 @@ export default function ChangeLog() {
     setLogs(logData||[])
     // Filter clients for athletes client-side (simple and reliable)
     const parse = (v) => Array.isArray(v)?v:(v?(()=>{try{return JSON.parse(v)}catch{return[]}})():[])
-    const visibleClients = (!isManagement && profile?.id)
+    const visibleClients = (!canSeeAll && profile?.id)
       ? (clientData||[]).filter(cl =>
           parse(cl.cs_ids).includes(profile.id) ||
           parse(cl.mb_ids).includes(profile.id) ||
@@ -251,7 +252,7 @@ export default function ChangeLog() {
 
   const filtered = logs.filter(l=>{
     // Athletes only see logs for their assigned clients
-    if (!isManagement && !visibleClientIds.has(l.client_id)) return false
+    if (!canSeeAll && !visibleClientIds.has(l.client_id)) return false
     if (platformFilter!=='all'&&l.platform!==platformFilter) return false
     if (clientFilter!=='all'&&l.client_id!==clientFilter) return false
     if (memberFilter!=='all'&&l.entered_by!==memberFilter) return false
@@ -393,7 +394,7 @@ export default function ChangeLog() {
                       </div>
                       {entries.map(entry=>(
                         <LogRow key={entry.id} entry={entry} clientMap={clientMap} memberMap={memberMap}
-                          canDelete={entry.entered_by===profile?.id||isManagement}
+                          canDelete={entry.entered_by===profile?.id||canSeeAll}
                           onDelete={handleDelete}/>
                       ))}
                     </div>

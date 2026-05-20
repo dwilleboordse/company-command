@@ -362,7 +362,7 @@ function AddClientModal({ onClose, onSave }) {
 }
 
 export default function Clients() {
-  const { isManagement } = useAuth()
+  const { isManagement, isOps } = useAuth()
   const [clients, setClients] = useState([])
   const [entries, setEntries] = useState({})
   const [loading, setLoading] = useState(true)
@@ -396,7 +396,7 @@ export default function Clients() {
   const archivedClients = clients.filter(c=>c.is_archived)
   const displayClients = showArchived ? archivedClients : activeClients
 
-  if (!isManagement) return <div className="page-body" style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'60vh'}}><p className="text-muted">Management access only.</p></div>
+  if (!isManagement && !isOps) return <div className="page-body" style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'60vh'}}><p className="text-muted">Management access only.</p></div>
 
   const RISK_ORDER={Leaving:0,High:1,Medium:2,Low:3}
   let filtered=clients.filter(c=>{
