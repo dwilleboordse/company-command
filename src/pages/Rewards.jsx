@@ -1,7 +1,144 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { computeAndAwardBadges, getLeaderboard } from '../lib/badges'
+import { ShieldCheck } from 'lucide-react'
+
+// Items tracked on the Accountability page (mirror of Accountability.jsx)
+const ACCOUNTABILITY_BOOLS = [
+  'monday_intentions','friday_reflections','mvp_votes','client_reports',
+  'monthly_survey','on_time_pod_calls','on_time_client_calls',
+]
+
+// ── ACCOUNTABILITY LEADERBOARD ─────────────────────────────
+function AccountabilityLeaderboard() {
+  const [loading, setLoading] = useState(true)
+  const [logs, setLogs] = useState([])
+  const [members, setMembers] = useState([])
+
+  useEffect(() => { load() }, [])
+
+  async function load() {
+    setLoading(true)
+    const [{ data: logData }, { data: memberData }] = await Promise.all([
+      supabase.from('accountability_logs').select('*').order('week_start', { ascending: false }).limit(2000),
+      supabase.from('profiles').select('id,full_name,position,role,avatar_url').order('full_name'),
+    ])
+    setLogs(logData || [])
+    setMembers((memberData || []).filter(m => m.full_name))
+    setLoading(false)
+  }
+
+  const ranked = useMemo(() => {
+    const byUser = {}
+    logs.forEach(l => {
+      if (!byUser[l.user_id]) byUser[l.user_id] = []
+      byUser[l.user_id].push(l)
+    })
+    const rows = members.map(m => {
+      const userLogs = byUser[m.id] || []
+      let boolPoints = 0
+      let slackPoints = 0
+      let slackCount = 0
+      userLogs.forEach(l => {
+        ACCOUNTABILITY_BOOLS.forEach(k => { if (l[k]) boolPoints++ })
+        if (typeof l.slack_participation === 'number') {
+          slackPoints += l.slack_participation
+          slackCount++
+        }
+      })
+      const weeks = userLogs.length
+      const maxBool = weeks * ACCOUNTABILITY_BOOLS.length
+      const boolPct  = maxBool > 0 ? (boolPoints / maxBool) * 100 : 0
+      const avgSlack = slackCount > 0 ? slackPoints / slackCount : 0
+      // Score: 70% weight on bool completion, 30% weight on slack participation (out of 10 → 100)
+      const score = Math.round(boolPct * 0.7 + (avgSlack * 10) * 0.3)
+      return {
+        id: m.id,
+        full_name: m.full_name,
+        position: m.position || m.role,
+        avatar_url: m.avatar_url,
+        weeks,
+        boolPct: Math.round(boolPct),
+        avgSlack: Number(avgSlack.toFixed(1)),
+        score,
+      }
+    })
+      .filter(r => r.weeks > 0) // only show people who have at least one log
+      .sort((a, b) => b.score - a.score)
+    return rows
+  }, [logs, members])
+
+  if (loading) return <div className="empty-state"><div className="spinner" style={{ display: 'inline-block' }} /></div>
+
+  if (ranked.length === 0) return (
+    <div className="empty-state">
+      <p>No accountability data yet. Once ops/management logs the first week, the leaderboard goes live.</p>
+    </div>
+  )
+
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style={{ width: 60 }}>Rank</th>
+            <th>Team member</th>
+            <th style={{ textAlign: 'right' }}>Weeks logged</th>
+            <th style={{ textAlign: 'right' }}>Item completion</th>
+            <th style={{ textAlign: 'right' }}>Slack avg</th>
+            <th style={{ textAlign: 'right' }}>Score</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ranked.map((r, i) => {
+            const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : null
+            const initials = (r.full_name || '?').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
+            const scoreTone = r.score >= 85 ? 'var(--green)' : r.score >= 60 ? 'var(--amber)' : 'var(--red)'
+            return (
+              <tr key={r.id}>
+                <td style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
+                  {medal ? <span style={{ fontSize: 16 }}>{medal}</span> : `#${i + 1}`}
+                </td>
+                <td>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{
+                      width: 30, height: 30, borderRadius: '50%',
+                      background: 'var(--accent-grad)', color: '#fff',
+                      display: 'grid', placeItems: 'center',
+                      fontSize: 11, fontWeight: 700, overflow: 'hidden', flexShrink: 0
+                    }}>
+                      {r.avatar_url ? <img src={r.avatar_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : initials}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{r.full_name}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'capitalize' }}>
+                        {(r.position || '').replace(/_/g, ' ')}
+                      </div>
+                    </div>
+                  </div>
+                </td>
+                <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.weeks}</td>
+                <td style={{ textAlign: 'right' }}>
+                  <span className={`chip ${r.boolPct >= 85 ? 'green' : r.boolPct >= 60 ? 'amber' : 'red'}`}>{r.boolPct}%</span>
+                </td>
+                <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                  {r.avgSlack ? `${r.avgSlack}/10` : '—'}
+                </td>
+                <td style={{ textAlign: 'right' }}>
+                  <span style={{
+                    fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 700,
+                    letterSpacing: '-0.02em', color: scoreTone,
+                  }}>{r.score}</span>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
 
 const CATEGORY_LABELS = {
   performance: 'Performance', milestones: 'Milestones', consistency: 'Consistency',
@@ -336,10 +473,14 @@ export default function RewardsPage() {
               🏆 Leaderboard
             </button>
           )}
+          <button className={`tab ${tab === 'accountability' ? 'active' : ''}`} onClick={() => setTab('accountability')}>
+            🛡️ Accountability Leaderboard
+          </button>
         </div>
 
         {tab === 'badges' && profile && <MyBadges profile={profile} />}
         {tab === 'leaderboard' && isManagement && <Leaderboard />}
+        {tab === 'accountability' && <AccountabilityLeaderboard />}
       </div>
     </>
   )
