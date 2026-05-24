@@ -62,8 +62,14 @@ function addWeeks(d, n) {
   r.setDate(r.getDate() + n*7)
   return r
 }
+// Local-time YYYY-MM-DD (avoids UTC shift that turns Monday into Sunday)
 function toDateStr(d) {
-  return d.toISOString().split('T')[0]
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+}
+// Parse YYYY-MM-DD as a local-time Date
+function parseISODate(str) {
+  const [y, m, d] = str.split('-').map(Number)
+  return new Date(y, m-1, d)
 }
 function isCurrentWeek(dateStr) {
   const now = new Date()
@@ -382,12 +388,12 @@ export default function SpendTracker() {
   }
 
   // Week navigation
-  function prevWeek() { setSelectedWeek(w => toDateStr(addWeeks(new Date(w), -1))) }
+  function prevWeek() { setSelectedWeek(w => toDateStr(addWeeks(parseISODate(w), -1))) }
   function nextWeek() {
-    const next = toDateStr(addWeeks(new Date(selectedWeek), 1))
+    const next = toDateStr(addWeeks(parseISODate(selectedWeek), 1))
     if (!isFutureWeek(next)) setSelectedWeek(next)
   }
-  const canGoNext = !isFutureWeek(toDateStr(addWeeks(new Date(selectedWeek), 1)))
+  const canGoNext = !isFutureWeek(toDateStr(addWeeks(parseISODate(selectedWeek), 1)))
   function prevMonth() { setSelectedMonth(m=>addMonths(m,-1)) }
   function nextMonth() {
     const next=addMonths(selectedMonth,1)
