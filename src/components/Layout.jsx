@@ -6,7 +6,7 @@ import { useTheme } from '../contexts/ThemeContext'
 import {
   LayoutDashboard, Target, Calendar, Video, LogOut, Settings, TrendingUp,
   Users, DollarSign, Menu, X, FileText, Trophy, Heart, UserCheck, Sun, Moon,
-  ClipboardCheck, BarChart3
+  ClipboardCheck, BarChart3, ShieldCheck
 } from 'lucide-react'
 
 export default function Layout() {
@@ -98,6 +98,11 @@ export default function Layout() {
           <NavLink to="/onboarding" className={nl}>
             <ClipboardCheck size={17} /> <span>Onboarding</span>
           </NavLink>
+          {(isManagement || isOps) && (
+            <NavLink to="/accountability" className={nl}>
+              <ShieldCheck size={17} /> <span>Accountability</span>
+            </NavLink>
+          )}
 
           {isManagement && (
             <>
