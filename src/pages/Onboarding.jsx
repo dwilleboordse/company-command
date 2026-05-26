@@ -304,7 +304,8 @@ function ClientChecklistCard({ client, allMembers, isManagement }) {
 
 // ── MAIN PAGE ─────────────────────────────────────────────────
 export default function Onboarding() {
-  const { isManagement } = useAuth()
+  const { isManagement, isOps } = useAuth()
+  const canEdit = isManagement || isOps
   const [clients, setClients] = useState([])
   const [allMembers, setAllMembers] = useState([])
   const [loading, setLoading] = useState(true)
@@ -348,7 +349,7 @@ export default function Onboarding() {
           ? <div className="loading-screen" style={{minHeight:200,background:'transparent'}}><div className="spinner"/></div>
           : filtered.map(client=>(
               <ClientChecklistCard key={client.id} client={client}
-                allMembers={allMembers} isManagement={isManagement}/>
+                allMembers={allMembers} isManagement={canEdit}/>
             ))
         }
         {!loading&&filtered.length===0&&(

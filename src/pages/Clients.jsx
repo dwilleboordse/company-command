@@ -473,7 +473,7 @@ export default function Clients() {
           <div style={{display:'flex',flexDirection:'column',gap:8}}>
             {filtered.map(client=>(
               <ClientCard key={client.id} client={client} latestEntry={entries[client.id]?.[0]} history={entries[client.id]}
-                onEdit={()=>setEditClient(client)} onDelete={()=>handleDelete(client.id)} isManagement={isManagement}/>
+                onEdit={()=>setEditClient(client)} onDelete={()=>handleDelete(client.id)} isManagement={isManagement||isOps}/>
             ))}
           </div>
         )}
