@@ -225,6 +225,52 @@ const CSS = `
 .hdp-fade{animation:hdpfade .35s ease}
 @keyframes hdpfade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 
+/* anchored-OKR reference card (Step 3) */
+.hdp-okr-ref{border:1px solid var(--line);border-left:3px solid var(--gold);border-radius:11px;
+  background:var(--panel2);padding:14px 16px;margin-bottom:22px}
+.hdp-okr-ref-head{font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--gold);display:flex;align-items:center;gap:8px;margin-bottom:11px}
+.hdp-okr-ref-item{margin-bottom:10px}
+.hdp-okr-ref-item:last-child{margin-bottom:0}
+.hdp-okr-ref-title{font-size:13.5px;font-weight:600;color:var(--parchment);margin-bottom:4px}
+.hdp-okr-ref-krs{list-style:none;margin:0;padding:0 0 0 14px;display:flex;flex-direction:column;gap:3px}
+.hdp-okr-ref-krs li{font-family:var(--mono);font-size:11.5px;color:var(--muted);line-height:1.5;
+  position:relative;padding-left:11px}
+.hdp-okr-ref-krs li::before{content:'';position:absolute;left:0;top:7px;width:3px;height:3px;
+  background:var(--gold-2);border-radius:999px}
+
+/* top-level tabs (My Plan / Team Plans) */
+.hdp-tabs{display:flex;gap:4px;padding:0;margin:20px 0 4px;border-bottom:1px solid var(--line)}
+.hdp-tabs button{padding:10px 16px;font-size:13.5px;font-weight:500;color:var(--muted);
+  border-bottom:2px solid transparent;margin-bottom:-1px;transition:color .15s,border-color .15s}
+.hdp-tabs button:hover{color:var(--parchment)}
+.hdp-tabs button.active{color:var(--gold);border-bottom-color:var(--gold);font-weight:600}
+
+/* team plans list */
+.hdp-team-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;
+  gap:14px;padding:22px 0 18px}
+.hdp-team-stats{font-family:var(--mono);font-size:11.5px;color:var(--muted);letter-spacing:.04em}
+.hdp-team-stats b{color:var(--parchment)}
+.hdp-team-row{border:1px solid var(--line);border-radius:11px;background:var(--panel);
+  margin-bottom:10px;overflow:hidden;transition:border-color .15s}
+.hdp-team-row:hover{border-color:var(--line2)}
+.hdp-team-row-h{display:flex;align-items:center;gap:14px;padding:14px 16px;cursor:pointer}
+.hdp-team-avatar{width:34px;height:34px;border-radius:999px;background:var(--raise);
+  color:var(--gold);display:grid;place-items:center;font-size:12px;font-weight:600;flex:none;
+  border:1px solid var(--line2)}
+.hdp-team-name{font-size:14px;font-weight:600;color:var(--parchment);flex:1;min-width:0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hdp-team-name .role{font-family:var(--mono);font-size:11px;color:var(--muted);font-weight:400;
+  margin-left:8px;letter-spacing:.02em}
+.hdp-team-tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.10em;text-transform:uppercase;
+  padding:3px 9px;border-radius:999px;font-weight:600;flex:none}
+.hdp-team-tag.committed{background:rgba(95,179,166,.15);color:var(--teal);border:1px solid rgba(95,179,166,.3)}
+.hdp-team-tag.draft{background:var(--raise);color:var(--muted);border:1px solid var(--line2)}
+.hdp-team-meta{font-family:var(--mono);font-size:11px;color:var(--faint);text-align:right;flex:none;
+  min-width:90px;line-height:1.5}
+.hdp-team-meta b{color:var(--parchment);font-weight:500}
+.hdp-team-row-body{padding:0 20px 20px;border-top:1px solid var(--line)}
+
 .hdp-mobile-prog{display:none}
 
 @media (max-width:880px){
@@ -283,15 +329,16 @@ const fmt = (d) => d ? new Date(d).toLocaleDateString(undefined, { month: "short
 const fmtY = (d) => d ? new Date(d).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—";
 
 export default function HundredDayPlan() {
-  const { profile } = useAuth()
+  const { profile, isManagement, isOps } = useAuth()
+  const canSeeTeamPlans = isManagement || isOps
   const [step, setStep] = useState(0);
   const [okrCfg, setOkrCfg] = useState({});       // department label → [{ id, objective, keyResults: [string,...] }]
-  const [editOkr, setEditOkr] = useState(false);
   const [loadingPlan, setLoadingPlan] = useState(true);
   const [saveStatus, setSaveStatus] = useState({ state: 'idle', at: null }); // 'idle' | 'saving' | 'saved' | 'error'
   const [viewMode, setViewMode] = useState('wizard');         // 'wizard' | 'summary'
   const [committedAt, setCommittedAt] = useState(null);       // ISO timestamp when last committed
   const planStatusRef = useRef('draft');                      // current persisted status ('draft' | 'committed')
+  const [tab, setTab] = useState('mine');                     // 'mine' | 'team' — only relevant for mgmt/ops
 
   const [member, setMember] = useState({ name: "", role: "", department: "", startDate: "" });
   const [anchors, setAnchors] = useState([]);
@@ -463,14 +510,7 @@ export default function HundredDayPlan() {
   const delInit = (oid, i) => setObjectives(objectives.map(o => o.id === oid
     ? { ...o, initiatives: o.initiatives.filter((_, j) => j !== i) } : o));
 
-  // OKR config editing (local-only — doesn't write back to the OKR system)
-  const editObjText = (id, v) => setOkrCfg({ ...okrCfg, [member.department]: deptOkrs.map(o => o.id === id ? { ...o, objective: v } : o) });
-  const editKrText = (id, i, v) => setOkrCfg({ ...okrCfg, [member.department]: deptOkrs.map(o => o.id === id ? { ...o, keyResults: o.keyResults.map((k, j) => j === i ? v : k) } : o) });
-  const addCfgKr = (id) => setOkrCfg({ ...okrCfg, [member.department]: deptOkrs.map(o => o.id === id ? { ...o, keyResults: [...o.keyResults, ""] } : o) });
-  const delCfgKr = (id, i) => setOkrCfg({ ...okrCfg, [member.department]: deptOkrs.map(o => o.id === id ? { ...o, keyResults: o.keyResults.filter((_, j) => j !== i) } : o) });
-  const addCfgOkr = () => setOkrCfg({ ...okrCfg, [member.department]: [...deptOkrs, { id: uid(), objective: "", keyResults: [""] }] });
-  const delCfgOkr = (id) => { setOkrCfg({ ...okrCfg, [member.department]: deptOkrs.filter(o => o.id !== id) }); setAnchors(anchors.filter(a => a !== id)); };
-
+  // OKRs are read-only — they come from the dashboard's OKR system. Users only select anchors here.
   const toggleAnchor = (id) => setAnchors(anchors.includes(id) ? anchors.filter(a => a !== id) : [...anchors, id]);
 
   const canContinue = () => {
@@ -526,6 +566,144 @@ export default function HundredDayPlan() {
     )
     return null
   }
+
+  /* ── TEAM PLANS (mgmt/ops only) ─────────────────────────── */
+  const TeamPlans = () => {
+    const [plans, setPlans] = useState([])
+    const [members, setMembers] = useState({})
+    const [loading, setLoading] = useState(true)
+    const [expanded, setExpanded] = useState(null)
+    const [filter, setFilter] = useState('all')   // 'all' | 'committed' | 'draft'
+
+    useEffect(() => {
+      (async () => {
+        setLoading(true)
+        const [{ data: planRows }, { data: memberRows }] = await Promise.all([
+          supabase.from('hundred_day_plans').select('*').order('updated_at', { ascending: false }),
+          supabase.from('profiles').select('id, full_name, position, role, avatar_url'),
+        ])
+        const memberMap = {}
+        ;(memberRows || []).forEach(m => { memberMap[m.id] = m })
+        setMembers(memberMap)
+        setPlans(planRows || [])
+        setLoading(false)
+      })()
+    }, [])
+
+    const visible = plans.filter(p => filter === 'all' || p.status === filter)
+    const committed = plans.filter(p => p.status === 'committed').length
+    const drafts    = plans.filter(p => p.status === 'draft').length
+
+    if (loading) return (
+      <div className="hdp-team-toolbar" style={{ justifyContent: 'center' }}>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)' }}>Loading team plans…</span>
+      </div>
+    )
+
+    return (
+      <div className="hdp-fade">
+        <div className="hdp-team-toolbar">
+          <div className="hdp-team-stats">
+            <b>{plans.length}</b> plans · <b>{committed}</b> committed · <b>{drafts}</b> drafts
+          </div>
+          <div className="hdp-tabs" style={{ margin: 0, border: 'none' }}>
+            {['all', 'committed', 'draft'].map(f => (
+              <button key={f} className={filter === f ? 'active' : ''} onClick={() => setFilter(f)}>
+                {f === 'all' ? 'All' : f === 'committed' ? 'Committed' : 'Drafts'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {visible.length === 0 ? (
+          <div className="hdp-empty">No plans match this filter.</div>
+        ) : visible.map(p => {
+          const m = members[p.user_id] || {}
+          const initials = (m.full_name || '?').split(' ').map(s => s[0]).slice(0,2).join('').toUpperCase()
+          const updated = p.updated_at ? new Date(p.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '—'
+          const isOpen = expanded === p.id
+          const anchoredObjs = (okrCfg[p.department] || []).filter(o => (p.anchored_objective_ids || []).includes(o.id))
+          return (
+            <div key={p.id} className="hdp-team-row">
+              <div className="hdp-team-row-h" onClick={() => setExpanded(isOpen ? null : p.id)}>
+                <div className="hdp-team-avatar">{initials}</div>
+                <div className="hdp-team-name">
+                  {p.name || m.full_name || '—'}
+                  <span className="role">{p.role || POSITION_LABELS[m.position] || m.position || ''}</span>
+                </div>
+                <span className={`hdp-team-tag ${p.status === 'committed' ? 'committed' : 'draft'}`}>
+                  {p.status === 'committed' ? '✓ Committed' : '· Draft'}
+                </span>
+                <div className="hdp-team-meta">
+                  {p.department || '—'}<br />
+                  Updated <b>{updated}</b>
+                </div>
+                {isOpen ? <ChevronChevronUp /> : <ChevronChevronDown />}
+              </div>
+              {isOpen && (
+                <div className="hdp-team-row-body">
+                  <div className="hdp-rev-meta" style={{ marginTop: 14, marginBottom: 16 }}>
+                    {p.start_date && p.end_date && <>Window <b>{fmtY(p.start_date)} → {fmtY(p.end_date)}</b><br /></>}
+                    Confidence <b>{p.confidence ?? '—'}/10</b>
+                  </div>
+
+                  <div className="hdp-rev-sec">
+                    <h3>Anchored OKRs<span className="bar" /></h3>
+                    {anchoredObjs.length === 0
+                      ? <div className="hdp-empty" style={{ padding: 14 }}>No OKRs anchored.</div>
+                      : <ul className="hdp-rev-list">{anchoredObjs.map(o => <li key={o.id}>{o.objective}</li>)}</ul>}
+                  </div>
+
+                  <div className="hdp-rev-sec">
+                    <h3>Objectives<span className="bar" /></h3>
+                    {!Array.isArray(p.objectives) || p.objectives.length === 0
+                      ? <div className="hdp-empty" style={{ padding: 14 }}>No objectives.</div>
+                      : p.objectives.map((o, i) => (
+                        <div className="hdp-rev-obj" key={o.id || i}>
+                          <div className="t">{i + 1}. {o.statement || '—'}</div>
+                          {o.why && <div className="why">{o.why}</div>}
+                          {Array.isArray(o.keyResults) && o.keyResults.filter(k => k.metric?.trim()).length > 0 && (
+                            <ul>{o.keyResults.filter(k => k.metric?.trim()).map((k, j) => (
+                              <li key={k.id || j}>{k.metric}: {k.baseline || '?'} → {k.target || '?'} {k.unit}{k.source ? `  ·  ${k.source}` : ''}</li>
+                            ))}</ul>
+                          )}
+                          {o.lever && <div className="hdp-rev-lever"><b>Biggest lever:</b> {o.lever}</div>}
+                          {Array.isArray(o.initiatives) && o.initiatives.filter(x => x?.trim()).length > 0 && (
+                            <ul>{o.initiatives.filter(x => x?.trim()).map((x, j) => <li key={j}>{x}</li>)}</ul>
+                          )}
+                        </div>
+                      ))}
+                  </div>
+
+                  <div className="hdp-rev-sec">
+                    <h3>Checkpoints<span className="bar" /></h3>
+                    <ul className="hdp-rev-list">
+                      <li>Day 25: {p.checkpoints?.d25 || '—'}</li>
+                      <li>Day 50: {p.checkpoints?.d50 || '—'}</li>
+                      <li>Day 75: {p.checkpoints?.d75 || '—'}</li>
+                    </ul>
+                  </div>
+
+                  <div className="hdp-rev-sec">
+                    <h3>Risks & resourcing<span className="bar" /></h3>
+                    <ul className="hdp-rev-list">
+                      <li>Blocker: {p.risks?.blocker || '—'}</li>
+                      <li>Needs: {p.risks?.need || '—'}</li>
+                      <li>Dependencies: {p.risks?.deps || '—'}</li>
+                    </ul>
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
+  /* small chevron helpers used inside TeamPlans rows */
+  function ChevronChevronDown() { return <ChevronRight size={16} style={{ color: 'var(--faint)', transform: 'rotate(90deg)' }} /> }
+  function ChevronChevronUp()   { return <ChevronRight size={16} style={{ color: 'var(--gold)',  transform: 'rotate(-90deg)' }} /> }
 
   /* ── SUMMARY VIEW (shown after Commit) ─────────────────── */
   const Summary = () => {
@@ -626,17 +804,26 @@ export default function HundredDayPlan() {
         <div className="hdp-top">
           <div className="hdp-brand">
             <h1>100-Day Plan</h1>
-            <span className="os">{viewMode === 'summary' ? 'Committed' : 'Operator OS'}</span>
+            <span className="os">{tab === 'team' ? 'Team' : viewMode === 'summary' ? 'Committed' : 'Operator OS'}</span>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:14}}>
-            <SaveStatus />
-            {member.department && <div className="hdp-pill">{member.department}</div>}
+            {tab === 'mine' && <SaveStatus />}
+            {tab === 'mine' && member.department && <div className="hdp-pill">{member.department}</div>}
           </div>
         </div>
 
-        {viewMode === 'summary' && <Summary />}
+        {canSeeTeamPlans && (
+          <div className="hdp-tabs">
+            <button className={tab === 'mine' ? 'active' : ''} onClick={() => setTab('mine')}>My plan</button>
+            <button className={tab === 'team' ? 'active' : ''} onClick={() => setTab('team')}>Team plans</button>
+          </div>
+        )}
 
-        {viewMode === 'wizard' && (
+        {tab === 'team' && canSeeTeamPlans && <TeamPlans />}
+
+        {tab === 'mine' && viewMode === 'summary' && <Summary />}
+
+        {tab === 'mine' && viewMode === 'wizard' && (
         <div className="hdp-grid">
           <aside className="hdp-aside">
             <div className="hdp-steps">
@@ -691,31 +878,10 @@ export default function HundredDayPlan() {
               {/* STEP 1 — ANCHOR OKRs */}
               {step === 1 && (<>
                 <div className="hdp-eyebrow">Step 02 — Anchor OKRs<span className="bar" /></div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
-                  <div>
-                    <h2 className="hdp-h2">Which department OKR does this serve?</h2>
-                    <p className="hdp-sub">Pulled live from your dashboard's OKR system for {currentQuarter()}. If it doesn't ladder up to a {member.department || "department"} OKR, it doesn't belong in this cycle.</p>
-                  </div>
-                  <button className="hdp-add" onClick={() => setEditOkr(!editOkr)} style={{ flex: "none" }}>
-                    <Pencil size={14} />{editOkr ? "Done" : "Edit OKRs"}
-                  </button>
-                </div>
-                {deptOkrs.length === 0 && <div className="hdp-empty">No active OKRs found for {member.department || 'your department'} in {currentQuarter()}. Open the OKRs page to add them, or use "Edit OKRs" to draft locally.</div>}
-                {deptOkrs.map(o => editOkr ? (
-                  <div key={o.id} className="hdp-card">
-                    <button className="hdp-remove" onClick={() => delCfgOkr(o.id)}><X size={15} /></button>
-                    <div className="hdp-card-tag"><Lock size={12} /> Objective</div>
-                    <input className="hdp-input" value={o.objective} placeholder="Objective…" onChange={e => editObjText(o.id, e.target.value)} style={{ marginBottom: 12 }} />
-                    {o.keyResults.map((k, i) => (
-                      <div className="hdp-initrow" key={i}>
-                        <span className="idx">KR{i + 1}</span>
-                        <input className="hdp-input num" value={k} placeholder="Key result…" onChange={e => editKrText(o.id, i, e.target.value)} />
-                        <button className="hdp-kr-x" onClick={() => delCfgKr(o.id, i)}><X size={14} /></button>
-                      </div>
-                    ))}
-                    <button className="hdp-add" onClick={() => addCfgKr(o.id)} style={{ marginTop: 6 }}><Plus size={14} /> Add key result</button>
-                  </div>
-                ) : (
+                <h2 className="hdp-h2">Which department OKR does this serve?</h2>
+                <p className="hdp-sub">Pulled live from your dashboard's OKR system for {currentQuarter()}. These are set — your job here is to pick which one(s) this plan moves.</p>
+                {deptOkrs.length === 0 && <div className="hdp-empty">No active OKRs found for {member.department || 'your department'} in {currentQuarter()}. Ask leadership to add them in the OKRs page.</div>}
+                {deptOkrs.map(o => (
                   <div key={o.id} className={`hdp-okr${anchors.includes(o.id) ? " sel" : ""}`} onClick={() => toggleAnchor(o.id)}>
                     <div className="hdp-okr-h">
                       <span className="hdp-check">{anchors.includes(o.id) && <Check size={13} />}</span>
@@ -724,8 +890,7 @@ export default function HundredDayPlan() {
                     <ul className="hdp-okr-krs">{o.keyResults.filter(Boolean).map((k, i) => <li key={i}>{k}</li>)}</ul>
                   </div>
                 ))}
-                {editOkr && <button className="hdp-add block" onClick={addCfgOkr}><Plus size={14} /> Add another OKR</button>}
-                {!editOkr && anchors.length === 0 && <div className="hdp-nudge"><Lock size={14} /> Select at least one OKR to continue.</div>}
+                {anchors.length === 0 && deptOkrs.length > 0 && <div className="hdp-nudge"><Lock size={14} /> Select at least one OKR to continue.</div>}
               </>)}
 
               {/* STEP 2 — OBJECTIVES */}
@@ -733,6 +898,24 @@ export default function HundredDayPlan() {
                 <div className="hdp-eyebrow">Step 03 — Objectives<span className="bar" /></div>
                 <h2 className="hdp-h2">Name the 1–3 outcomes that define your 100 days.</h2>
                 <p className="hdp-sub">Outcomes, not activities. "Make the creative engine produce winners predictably," not "make more ads." Three is the ceiling — pick what actually moves the OKR.</p>
+
+                {/* Reference card: the OKRs the user anchored in Step 2 */}
+                {anchors.length > 0 && (
+                  <div className="hdp-okr-ref">
+                    <div className="hdp-okr-ref-head"><Lock size={11} /> Your anchored OKRs · build objectives that move these</div>
+                    {deptOkrs.filter(o => anchors.includes(o.id)).map(o => (
+                      <div key={o.id} className="hdp-okr-ref-item">
+                        <div className="hdp-okr-ref-title">{o.objective}</div>
+                        {o.keyResults?.filter(Boolean).length > 0 && (
+                          <ul className="hdp-okr-ref-krs">
+                            {o.keyResults.filter(Boolean).map((k, i) => <li key={i}>{k}</li>)}
+                          </ul>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 {objectives.length === 0 && <div className="hdp-empty">No objectives yet. Add the outcomes you'll be measured on at Day 100.</div>}
                 {objectives.map((o, i) => (
                   <div key={o.id} className="hdp-card">
