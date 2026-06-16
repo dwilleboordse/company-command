@@ -419,8 +419,8 @@ export default function HundredDayPlan() {
       .from('hundred_day_plans')
       .upsert(payload, { onConflict: 'user_id' })
     if (error) {
-      console.error('Save plan failed:', error.message)
-      setSaveStatus({ state: 'error' })
+      console.error('Save plan failed:', error)
+      setSaveStatus({ state: 'error', message: error.message || 'unknown error' })
     } else {
       setSaveStatus({ state: 'saved', at: Date.now() })
     }
@@ -565,7 +565,15 @@ export default function HundredDayPlan() {
   const SaveStatus = () => {
     if (saveStatus.state === 'saving') return <span className="hdp-save-status dim"><Save size={12}/> Saving…</span>
     if (saveStatus.state === 'saved')  return <span className="hdp-save-status"><Check size={12}/> Saved</span>
-    if (saveStatus.state === 'error')  return <span className="hdp-save-status" style={{color:'var(--danger)'}}>Save failed</span>
+    if (saveStatus.state === 'error')  return (
+      <span
+        className="hdp-save-status"
+        style={{ color: 'var(--danger)', maxWidth: 560, whiteSpace: 'normal', textAlign: 'right', lineHeight: 1.4 }}
+        title={saveStatus.message || 'Save failed'}
+      >
+        Save failed: {saveStatus.message || 'unknown error'}
+      </span>
+    )
     return null
   }
 
