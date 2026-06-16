@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import {
   Target, ListChecks, Route, ShieldAlert, CheckCircle2,
-  Download, Copy, ChevronLeft, ChevronRight, Plus, X,
+  ChevronLeft, ChevronRight, Plus, X,
   Pencil, Gauge, Flag, Lock, Check, Save
 } from "lucide-react";
 
@@ -287,9 +287,10 @@ export default function HundredDayPlan() {
   const [step, setStep] = useState(0);
   const [okrCfg, setOkrCfg] = useState({});       // department label → [{ id, objective, keyResults: [string,...] }]
   const [editOkr, setEditOkr] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [loadingPlan, setLoadingPlan] = useState(true);
   const [saveStatus, setSaveStatus] = useState({ state: 'idle', at: null }); // 'idle' | 'saving' | 'saved' | 'error'
+  const [viewMode, setViewMode] = useState('wizard');         // 'wizard' | 'summary'
+  const [committedAt, setCommittedAt] = useState(null);       // ISO timestamp when last committed
 
   const [member, setMember] = useState({ name: "", role: "", department: "", startDate: "" });
   const [anchors, setAnchors] = useState([]);
@@ -381,6 +382,8 @@ export default function HundredDayPlan() {
         setCps(planData.checkpoints || { d25: '', d50: '', d75: '' })
         setRisk(planData.risks || { blocker: '', need: '', deps: '' })
         setConfidence(planData.confidence ?? 6)
+        setCommittedAt(planData.status === 'committed' ? planData.updated_at : null)
+        if (planData.status === 'committed') setViewMode('summary')
       } else {
         // Pre-fill from profile so the user doesn't re-type basics
         setMember(m => ({
@@ -472,65 +475,6 @@ export default function HundredDayPlan() {
     return true;
   };
 
-  const buildMarkdown = () => {
-    const L = [];
-    L.push(`# 100-Day Plan — ${member.name || "Unnamed"}${member.role ? ` (${member.role})` : ""}`);
-    L.push(`Department: ${member.department || "—"}`);
-    if (dates) {
-      L.push(`Window: ${fmtY(dates.start)} → ${fmtY(dates.d100)}  (Day 1–100)`);
-      L.push(`Checkpoints: D25 ${fmt(dates.d25)} · D50 ${fmt(dates.d50)} · D75 ${fmt(dates.d75)} · D100 ${fmt(dates.d100)}`);
-    }
-    L.push("");
-    L.push("## Anchored OKRs");
-    deptOkrs.filter(o => anchors.includes(o.id)).forEach(o => L.push(`- ${o.objective}`));
-    objectives.forEach((o, i) => {
-      L.push("");
-      L.push(`## Objective ${i + 1} — ${o.statement}`);
-      if (o.why) L.push(`Why: ${o.why}`);
-      L.push("Key results:");
-      o.keyResults.filter(k => k.metric.trim()).forEach(k =>
-        L.push(`- ${k.metric}: ${k.baseline || "?"} → ${k.target || "?"} ${k.unit}`.trim() + (k.source ? `  (source: ${k.source})` : "")));
-      if (o.lever) L.push(`Biggest lever: ${o.lever}`);
-      const inits = o.initiatives.filter(x => x.trim());
-      if (inits.length) { L.push("Gameplan:"); inits.forEach(x => L.push(`- ${x}`)); }
-    });
-    L.push("");
-    L.push("## Checkpoints");
-    L.push(`- Day 25 (${dates ? fmt(dates.d25) : "—"}): ${cps.d25 || "—"}`);
-    L.push(`- Day 50 (${dates ? fmt(dates.d50) : "—"}): ${cps.d50 || "—"}`);
-    L.push(`- Day 75 (${dates ? fmt(dates.d75) : "—"}): ${cps.d75 || "—"}`);
-    L.push("");
-    L.push("## Risks & resourcing");
-    L.push(`Blocker: ${risk.blocker || "—"}`);
-    L.push(`Needs: ${risk.need || "—"}`);
-    L.push(`Dependencies: ${risk.deps || "—"}`);
-    L.push("");
-    L.push(`Confidence: ${confidence}/10`);
-    return L.join("\n");
-  };
-
-  const buildJSON = () => JSON.stringify({
-    member, cycle: dates ? {
-      start: new Date(dates.start).toISOString().slice(0, 10),
-      end: new Date(dates.d100).toISOString().slice(0, 10),
-      checkpoints: { day25: new Date(dates.d25).toISOString().slice(0, 10), day50: new Date(dates.d50).toISOString().slice(0, 10), day75: new Date(dates.d75).toISOString().slice(0, 10), day100: new Date(dates.d100).toISOString().slice(0, 10) },
-    } : null,
-    anchoredOKRs: deptOkrs.filter(o => anchors.includes(o.id)),
-    objectives: objectives.map(o => ({ statement: o.statement, why: o.why, lever: o.lever, keyResults: o.keyResults.filter(k => k.metric.trim()), gameplan: o.initiatives.filter(x => x.trim()) })),
-    checkpointTargets: cps, risks: risk, confidence,
-  }, null, 2);
-
-  const copyPlan = async (text) => {
-    try { await navigator.clipboard.writeText(text); setCopied(true); }
-    catch (e) {
-      try { const ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); setCopied(true); } catch (_) {}
-    }
-    setTimeout(() => setCopied(false), 1800);
-  };
-  const downloadFile = (name, text, type = "application/json") => {
-    try { const b = new Blob([text], { type }); const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(u); } catch (e) {}
-  };
-
   const go = (n) => setStep(Math.max(0, Math.min(STEPS.length - 1, n)));
 
   const Track = () => {
@@ -577,6 +521,97 @@ export default function HundredDayPlan() {
     return null
   }
 
+  /* ── SUMMARY VIEW (shown after Commit) ─────────────────── */
+  const Summary = () => {
+    const anchoredObjs = deptOkrs.filter(o => anchors.includes(o.id))
+    const committedLabel = committedAt
+      ? new Date(committedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+      : '—'
+    return (
+      <div className="hdp-fade" style={{ paddingTop: 24 }}>
+        <div className="hdp-eyebrow">
+          <Lock size={12} /> Committed plan · last updated {committedLabel}
+          <span className="bar" />
+        </div>
+
+        <div className="hdp-rev-head" style={{ marginBottom: 22 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap' }}>
+            <div>
+              <div className="hdp-rev-name">{member.name || 'Unnamed'}{member.role ? ` · ${member.role}` : ''}</div>
+              <div className="hdp-rev-meta" style={{ marginTop: 6 }}>
+                <b>{member.department || '—'}</b><br />
+                {dates && <>Window <b>{fmtY(dates.start)} → {fmtY(dates.d100)}</b><br />
+                  D25 {fmt(dates.d25)} · D50 {fmt(dates.d50)} · D75 {fmt(dates.d75)} · D100 {fmt(dates.d100)}<br /></>}
+                Confidence <b>{confidence}/10</b>
+              </div>
+            </div>
+            <button
+              className="hdp-btn ghost"
+              onClick={() => { setViewMode('wizard'); setStep(0) }}
+              title="Edit any field — your plan will re-save automatically as you go."
+            >
+              <Pencil size={14} /> Edit plan
+            </button>
+          </div>
+        </div>
+
+        <Track />
+
+        <div className="hdp-rev-sec" style={{ marginTop: 24 }}>
+          <h3>Anchored OKRs<span className="bar" /></h3>
+          {anchoredObjs.length === 0
+            ? <div className="hdp-empty">No OKRs anchored.</div>
+            : <ul className="hdp-rev-list">{anchoredObjs.map(o => <li key={o.id}>{o.objective}</li>)}</ul>}
+        </div>
+
+        <div className="hdp-rev-sec">
+          <h3>Objectives<span className="bar" /></h3>
+          {objectives.length === 0
+            ? <div className="hdp-empty">No objectives defined.</div>
+            : objectives.map((o, i) => (
+              <div className="hdp-rev-obj" key={o.id}>
+                <div className="t">{i + 1}. {o.statement || '—'}</div>
+                {o.why && <div className="why">{o.why}</div>}
+                {o.keyResults.filter(k => k.metric?.trim()).length > 0 && (
+                  <ul>{o.keyResults.filter(k => k.metric?.trim()).map(k => (
+                    <li key={k.id}>{k.metric}: {k.baseline || '?'} → {k.target || '?'} {k.unit}{k.source ? `  ·  ${k.source}` : ''}</li>
+                  ))}</ul>
+                )}
+                {o.lever && <div className="hdp-rev-lever"><b>Biggest lever:</b> {o.lever}</div>}
+                {o.initiatives.filter(x => x?.trim()).length > 0 && (
+                  <ul>{o.initiatives.filter(x => x?.trim()).map((x, j) => <li key={j}>{x}</li>)}</ul>
+                )}
+              </div>
+            ))}
+        </div>
+
+        <div className="hdp-rev-sec">
+          <h3>Checkpoints<span className="bar" /></h3>
+          <ul className="hdp-rev-list">
+            <li>Day 25 ({dates ? fmt(dates.d25) : '—'}): {cps.d25 || '—'}</li>
+            <li>Day 50 ({dates ? fmt(dates.d50) : '—'}): {cps.d50 || '—'}</li>
+            <li>Day 75 ({dates ? fmt(dates.d75) : '—'}): {cps.d75 || '—'}</li>
+          </ul>
+        </div>
+
+        <div className="hdp-rev-sec">
+          <h3>Risks & resourcing<span className="bar" /></h3>
+          <ul className="hdp-rev-list">
+            <li>Blocker: {risk.blocker || '—'}</li>
+            <li>Needs: {risk.need || '—'}</li>
+            <li>Dependencies: {risk.deps || '—'}</li>
+          </ul>
+        </div>
+
+        <div style={{ marginTop: 28, paddingTop: 22, borderTop: '1px solid var(--line)', display: 'flex', justifyContent: 'flex-end' }}>
+          <button className="hdp-btn primary" onClick={() => { setViewMode('wizard'); setStep(0) }}>
+            <Pencil size={14} /> Edit plan
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="hdp">
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
@@ -585,7 +620,7 @@ export default function HundredDayPlan() {
         <div className="hdp-top">
           <div className="hdp-brand">
             <h1>100-Day Plan</h1>
-            <span className="os">Operator OS</span>
+            <span className="os">{viewMode === 'summary' ? 'Committed' : 'Operator OS'}</span>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:14}}>
             <SaveStatus />
@@ -593,6 +628,9 @@ export default function HundredDayPlan() {
           </div>
         </div>
 
+        {viewMode === 'summary' && <Summary />}
+
+        {viewMode === 'wizard' && (
         <div className="hdp-grid">
           <aside className="hdp-aside">
             <div className="hdp-steps">
@@ -866,20 +904,16 @@ export default function HundredDayPlan() {
                   </ul>
                 </div>
 
-                <div className="hdp-rev-sec">
-                  <h3>Dashboard payload (JSON)<span className="bar" /></h3>
-                  <div className="hdp-export-box">{buildJSON()}</div>
-                </div>
-
                 <div style={{ display: "flex", gap: 11, flexWrap: "wrap" }}>
-                  <button className="hdp-btn primary" onClick={() => savePlan('committed')}>
+                  <button
+                    className="hdp-btn primary"
+                    onClick={async () => {
+                      await savePlan('committed')
+                      setCommittedAt(new Date().toISOString())
+                      setViewMode('summary')
+                    }}
+                  >
                     <Lock size={16} /> Commit plan
-                  </button>
-                  <button className="hdp-btn teal" onClick={() => downloadFile(`100-day-plan-${(member.name || "plan").toLowerCase().replace(/\s+/g, "-")}.json`, buildJSON())}>
-                    <Download size={16} /> Download JSON
-                  </button>
-                  <button className="hdp-btn ghost" onClick={() => copyPlan(buildMarkdown())}>
-                    {copied ? <Check size={16} /> : <Copy size={16} />} {copied ? "Copied" : "Copy summary"}
                   </button>
                 </div>
               </>)}
@@ -900,6 +934,7 @@ export default function HundredDayPlan() {
 
           </main>
         </div>
+        )}
       </div>
     </div>
   );
