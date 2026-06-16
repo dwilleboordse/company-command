@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { Link } from 'react-router-dom'
-import { ArrowRight, CheckCircle2, Circle, AlertCircle } from 'lucide-react'
+import { ArrowRight, CheckCircle2, Circle, AlertCircle, Compass } from 'lucide-react'
 import { today, getMondayStr, getMonday, addDays, parseLocal, fmtDisplay, DAYS, local } from '../lib/dates'
 
 function getKRStatus(current, goal, direction) {
@@ -39,7 +39,7 @@ function currentQuarter() {
 }
 
 export default function Dashboard() {
-  const { profile, isCEO, isManagement, isOps } = useAuth()
+  const { profile, isCEO, isManagement } = useAuth()
   const [objectives, setObjectives] = useState([])
   const [keyResults, setKeyResults] = useState([])
   const [krValues, setKrValues] = useState([])
@@ -48,6 +48,7 @@ export default function Dashboard() {
   const [myClients, setMyClients] = useState([])
   const [spendEntries, setSpendEntries] = useState({})
   const [spendSummary, setSpendSummary] = useState({ totalDDU:0, totalAll:0, avgPct:null, atRisk:0, logged:0, total:0 })
+  const [plan, setPlan] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -102,6 +103,12 @@ export default function Dashboard() {
         setWeekOutcome(wo)
       } catch(e) { setWeekOutcome(null) }
 
+      // 100-day plan
+      try {
+        const {data:planRow}=await supabase.from('hundred_day_plans').select('*').eq('user_id',profile.id).maybeSingle()
+        setPlan(planRow || null)
+      } catch(e) { setPlan(null) }
+
       // Day entries
       try {
         const {data:days}=await supabase.from('day_entries').select('*').eq('user_id',profile.id)
@@ -113,7 +120,7 @@ export default function Dashboard() {
       try {
         let clientQ = supabase.from('clients').select('id,name,cs_ids,mb_ids,editor_ids,designer_ids,ugc_ids,assigned_cs_id')
           .eq('is_active',true).order('name')
-        if (!isManagement && !isOps && profile?.id) {
+        if (!isManagement && profile?.id) {
           clientQ = clientQ.contains('cs_ids', [profile.id])
         }
         const {data:allClients}=await clientQ
@@ -206,6 +213,9 @@ export default function Dashboard() {
           <div className="stat-box"><div className="stat-box-label">Total KRs</div><div className="stat-box-value text-accent">{myKRs.length}</div></div>
           <div className="stat-box"><div className="stat-box-label">Week Outcome</div><div className="stat-box-value" style={{fontSize:18,paddingTop:4}}>{weekOutcome?.outcomes?.length>0?<span className="text-green">Set ✓</span>:<span className="text-muted">—</span>}</div></div>
         </div>
+
+        {/* ── 100-DAY PLAN ── */}
+        <HundredDayBanner plan={plan} />
 
         {/* Weekly to-do grid */}
         <div className="section-header">
@@ -389,5 +399,121 @@ export default function Dashboard() {
         </div>
       </div>
     </>
+  )
+}
+
+// ── 100-DAY PLAN BANNER ─────────────────────────────────────
+function HundredDayBanner({ plan }) {
+  // No plan yet → CTA card
+  if (!plan) {
+    return (
+      <Link
+        to="/100-day-plan"
+        style={{
+          display:'flex', alignItems:'center', justifyContent:'space-between',
+          gap:16, padding:'18px 22px',
+          background:'linear-gradient(135deg, rgba(124,92,255,0.10) 0%, rgba(91,140,255,0.06) 100%)',
+          border:'1px solid var(--border)', borderLeft:'3px solid var(--accent)',
+          borderRadius:'var(--radius-lg)', marginBottom:24, textDecoration:'none', color:'inherit',
+          boxShadow:'var(--shadow-xs)', transition:'transform 0.15s, border-color 0.15s, box-shadow 0.15s',
+        }}
+      >
+        <div style={{ display:'flex', alignItems:'center', gap:14 }}>
+          <div style={{
+            width:42, height:42, borderRadius:11,
+            background:'var(--accent-grad, linear-gradient(135deg,#8b6dff,#5b8cff))',
+            display:'grid', placeItems:'center', flexShrink:0,
+            boxShadow:'0 4px 12px rgba(124,92,255,0.28)',
+          }}>
+            <Compass size={20} color="#fff" />
+          </div>
+          <div>
+            <div style={{ fontSize:15, fontWeight:700, color:'var(--text-primary)', letterSpacing:'-0.01em' }}>
+              Build your 100-day plan
+            </div>
+            <div style={{ fontSize:13, color:'var(--text-muted)', marginTop:2 }}>
+              Anchor your work to a quarterly OKR — every team member should have one.
+            </div>
+          </div>
+        </div>
+        <ArrowRight size={18} color="var(--accent)" />
+      </Link>
+    )
+  }
+
+  // Compute day-of-100 and percentage
+  const parse = (s) => { if(!s) return null; const [y,m,d]=s.split('-').map(Number); return new Date(y, m-1, d) }
+  const start = parse(plan.start_date), end = parse(plan.end_date)
+  const now = new Date(); now.setHours(0,0,0,0)
+  const totalDays = (start && end) ? Math.round((end - start) / 86400000) + 1 : null
+  const dayIdx = start ? Math.max(0, Math.round((now - start) / 86400000) + 1) : 0
+  const dayClamped = totalDays ? Math.min(totalDays, dayIdx) : dayIdx
+  const pct = totalDays ? Math.max(0, Math.min(100, (dayClamped / totalDays) * 100)) : 0
+  const committed = plan.status === 'committed'
+  const objCount = Array.isArray(plan.objectives) ? plan.objectives.length : 0
+  const fmt = (d) => d ? d.toLocaleDateString(undefined, { month:'short', day:'numeric' }) : '—'
+
+  return (
+    <Link
+      to="/100-day-plan"
+      style={{
+        display:'block', padding:'18px 22px', marginBottom:24,
+        background:'linear-gradient(135deg, rgba(124,92,255,0.08) 0%, rgba(91,140,255,0.04) 100%)',
+        border:'1px solid var(--border)', borderLeft:'3px solid var(--accent)',
+        borderRadius:'var(--radius-lg)', textDecoration:'none', color:'inherit',
+        boxShadow:'var(--shadow-xs)', transition:'border-color 0.15s, box-shadow 0.15s',
+      }}
+    >
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:16, flexWrap:'wrap' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:14 }}>
+          <div style={{
+            width:42, height:42, borderRadius:11,
+            background:'var(--accent-grad, linear-gradient(135deg,#8b6dff,#5b8cff))',
+            display:'grid', placeItems:'center', flexShrink:0,
+            boxShadow:'0 4px 12px rgba(124,92,255,0.28)',
+          }}>
+            <Compass size={20} color="#fff" />
+          </div>
+          <div>
+            <div style={{ fontSize:15, fontWeight:700, color:'var(--text-primary)', letterSpacing:'-0.01em' }}>
+              Your 100-day plan
+              <span style={{
+                marginLeft:10, fontSize:10, fontWeight:600, letterSpacing:'0.08em', textTransform:'uppercase',
+                padding:'3px 8px', borderRadius:999,
+                background: committed ? 'rgba(34,197,94,0.14)' : 'rgba(217,119,6,0.14)',
+                color: committed ? 'var(--green)' : 'var(--amber)',
+              }}>{committed ? '✓ Committed' : 'Draft'}</span>
+            </div>
+            <div style={{ fontSize:12.5, color:'var(--text-muted)', marginTop:3 }}>
+              {plan.department || '—'} · {objCount} objective{objCount === 1 ? '' : 's'}
+              {start && end && <> · {fmt(start)} → {fmt(end)}</>}
+              {typeof plan.confidence === 'number' && <> · confidence {plan.confidence}/10</>}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display:'flex', alignItems:'center', gap:14, minWidth:240, flex:1, maxWidth:380 }}>
+          {totalDays && (
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{
+                display:'flex', justifyContent:'space-between',
+                fontSize:11, color:'var(--text-muted)', marginBottom:5, fontWeight:500,
+              }}>
+                <span>Day {dayClamped} of {totalDays}</span>
+                <span>{Math.round(pct)}%</span>
+              </div>
+              <div style={{ height:6, background:'var(--bg-input)', borderRadius:999, overflow:'hidden' }}>
+                <div style={{
+                  width:`${pct}%`, height:'100%',
+                  background:'var(--accent-grad, linear-gradient(135deg,#8b6dff,#5b8cff))',
+                  borderRadius:999, transition:'width 0.5s ease',
+                }}/>
+              </div>
+            </div>
+          )}
+          <ArrowRight size={18} color="var(--accent)" style={{ flexShrink:0 }} />
+        </div>
+      </div>
+    </Link>
   )
 }
