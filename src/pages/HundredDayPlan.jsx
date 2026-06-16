@@ -291,6 +291,7 @@ export default function HundredDayPlan() {
   const [saveStatus, setSaveStatus] = useState({ state: 'idle', at: null }); // 'idle' | 'saving' | 'saved' | 'error'
   const [viewMode, setViewMode] = useState('wizard');         // 'wizard' | 'summary'
   const [committedAt, setCommittedAt] = useState(null);       // ISO timestamp when last committed
+  const planStatusRef = useRef('draft');                      // current persisted status ('draft' | 'committed')
 
   const [member, setMember] = useState({ name: "", role: "", department: "", startDate: "" });
   const [anchors, setAnchors] = useState([]);
@@ -382,6 +383,7 @@ export default function HundredDayPlan() {
         setCps(planData.checkpoints || { d25: '', d50: '', d75: '' })
         setRisk(planData.risks || { blocker: '', need: '', deps: '' })
         setConfidence(planData.confidence ?? 6)
+        planStatusRef.current = planData.status || 'draft'
         setCommittedAt(planData.status === 'committed' ? planData.updated_at : null)
         if (planData.status === 'committed') setViewMode('summary')
       } else {
@@ -401,9 +403,13 @@ export default function HundredDayPlan() {
   }, [profile?.id])
 
   // ── SAVE ─────────────────────────────────────────────────
-  const savePlan = useCallback(async (status = 'draft') => {
+  // Status defaults to whatever the plan currently is (tracked in planStatusRef).
+  // Pass an explicit override (e.g. 'committed') from the Commit button.
+  const savePlan = useCallback(async (overrideStatus) => {
     if (!profile?.id) return
     setSaveStatus({ state: 'saving' })
+    const status = overrideStatus ?? planStatusRef.current
+    if (overrideStatus) planStatusRef.current = overrideStatus
     const payload = {
       user_id: profile.id,
       name: member.name || null,
@@ -429,12 +435,12 @@ export default function HundredDayPlan() {
     }
   }, [profile?.id, member, dates, anchors, objectives, cps, risk, confidence])
 
-  // Debounced auto-save (1.2s after last edit)
+  // Debounced auto-save (1.2s after last edit) — preserves current status (draft or committed)
   const saveTimer = useRef(null)
   useEffect(() => {
     if (!profile?.id || loadingPlan) return
     if (saveTimer.current) clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(() => { savePlan('draft') }, 1200)
+    saveTimer.current = setTimeout(() => { savePlan() }, 1200)
     return () => clearTimeout(saveTimer.current)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [member, anchors, objectives, cps, risk, confidence])
@@ -908,6 +914,8 @@ export default function HundredDayPlan() {
                   <button
                     className="hdp-btn primary"
                     onClick={async () => {
+                      // Cancel any pending draft auto-save so it can't overwrite the commit
+                      if (saveTimer.current) clearTimeout(saveTimer.current)
                       await savePlan('committed')
                       setCommittedAt(new Date().toISOString())
                       setViewMode('summary')
