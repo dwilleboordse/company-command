@@ -16,14 +16,14 @@ import SpendTracker from './pages/SpendTracker'
 import ChangeLog from './pages/ChangeLog'
 import Rewards from './pages/Rewards'
 import Analytics from './pages/Analytics'
-import HundredDayPlan from './pages/HundredDayPlan'
+import Accountability from './pages/Accountability'
 
-function PR({ children, ceo=false, mgmt=false }) {
-  const { user, profile, loading } = useAuth()
+function PR({ children, ceo=false, mgmt=false, ops=false }) {
+  const { user, profile, loading, isOps } = useAuth()
   if (loading) return <div className="loading-screen"><div className="spinner"/></div>
   if (!user) return <Navigate to="/login" replace/>
   if (ceo && profile?.role!=='ceo') return <Navigate to="/" replace/>
-  if (mgmt && !['ceo','management'].includes(profile?.role)) return <Navigate to="/" replace/>
+  if (mgmt && !['ceo','management'].includes(profile?.role) && !(ops && isOps)) return <Navigate to="/" replace/>
   return children
 }
 
@@ -36,16 +36,16 @@ function AppRoutes() {
       <Route path="/" element={<PR><Layout/></PR>}>
         <Route index element={<Dashboard/>}/>
         <Route path="okrs" element={<OKRs/>}/>
-        <Route path="100-day-plan" element={<HundredDayPlan/>}/>
         <Route path="calendar" element={<Calendar/>}/>
         <Route path="meetings" element={<Meetings/>}/>
         <Route path="spend" element={<SpendTracker/>}/>
         <Route path="changelog" element={<ChangeLog/>}/>
         <Route path="rewards" element={<Rewards/>}/>
-        <Route path="clients" element={<PR mgmt><Clients/></PR>}/>
-        <Route path="team-health" element={<PR mgmt><TeamHealth/></PR>}/>
+        <Route path="accountability" element={<PR mgmt ops><Accountability/></PR>}/>
+        <Route path="clients" element={<PR mgmt ops><Clients/></PR>}/>
+        <Route path="team-health" element={<PR mgmt ops><TeamHealth/></PR>}/>
         <Route path="analytics" element={<PR mgmt><Analytics/></PR>}/>
-        <Route path="client-roster" element={<PR mgmt><ClientRoster/></PR>}/>
+        <Route path="client-roster" element={<PR mgmt ops><ClientRoster/></PR>}/>
         <Route path="onboarding" element={<PR><Onboarding/></PR>}/>
         <Route path="ceo" element={<PR ceo><CEOModels/></PR>}/>
         <Route path="admin" element={<PR ceo><Admin/></PR>}/>
