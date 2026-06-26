@@ -6,7 +6,7 @@ import { useTheme } from '../contexts/ThemeContext'
 import { LayoutDashboard, Target, Calendar, Video, LogOut, Settings, TrendingUp, Users, DollarSign, Menu, X, FileText, Trophy, Heart, UserCheck, Sun, Moon, ClipboardCheck, BarChart3, Compass } from 'lucide-react'
 
 export default function Layout() {
-  const { profile, signOut, isCEO, isManagement } = useAuth()
+  const { profile, signOut, isCEO, isManagement, isOps } = useAuth()
   const { theme, toggle } = useTheme()
   const navigate = useNavigate()
   const location = useLocation()
@@ -60,6 +60,11 @@ export default function Layout() {
             <>
               <p className="nav-section-label">Insights</p>
               <NavLink to="/analytics" className={nl}><BarChart3 size={16}/> Analytics</NavLink>
+            </>
+          )}
+
+          {(isManagement || isOps) && (
+            <>
               <p className="nav-section-label">Clients</p>
               <NavLink to="/client-roster" className={nl}><Users size={16}/> Client Roster</NavLink>
               <NavLink to="/clients" className={nl}><Heart size={16}/> Client Health</NavLink>
