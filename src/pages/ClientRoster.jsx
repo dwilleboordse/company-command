@@ -25,15 +25,30 @@ const ROLE_GROUPS = [
 ]
 
 // ── MEMBER PILL ──────────────────────────────────────────────
-function MemberPill({ member, color }) {
+function MemberPill({ member, color, onRemove }) {
   return (
-    <span style={{display:'inline-flex',alignItems:'center',gap:4,padding:'2px 8px',borderRadius:100,
+    <span style={{display:'inline-flex',alignItems:'center',gap:4,padding:'2px 4px 2px 8px',borderRadius:100,
       background:`${color}12`,border:`1px solid ${color}30`,fontSize:11,color,fontWeight:500}}>
       <span style={{width:16,height:16,borderRadius:'50%',background:`${color}20`,
         display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:7,fontWeight:700,color}}>
         {initials(member.full_name)}
       </span>
       {member.full_name}
+      {onRemove && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onRemove() }}
+          title="Remove"
+          style={{
+            marginLeft:2, width:16, height:16, borderRadius:'50%',
+            border:'none', background:'transparent', color,
+            display:'inline-flex', alignItems:'center', justifyContent:'center',
+            cursor:'pointer', fontSize:11, lineHeight:1, padding:0, opacity:0.7,
+          }}
+          onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+          onMouseLeave={e => e.currentTarget.style.opacity = '0.7'}
+        >×</button>
+      )}
     </span>
   )
 }
@@ -52,8 +67,11 @@ function MultiSelect({ label, ids, members, onChange, color }) {
           border:`1.5px solid ${open?color:'var(--border)'}`,
           background:'var(--bg-input)',minHeight:34,transition:'border-color 0.12s'}}>
         {selected.length===0
-          ? <span style={{fontSize:12,color:'var(--text-muted)'}}>Unassigned</span>
-          : selected.map(m=><MemberPill key={m.id} member={m} color={color}/>)}
+          ? <span style={{fontSize:12,color:'var(--text-muted)'}}>Unassigned · click to add</span>
+          : selected.map(m=>(
+              <MemberPill key={m.id} member={m} color={color}
+                onRemove={() => onChange(ids.filter(x => x !== m.id))}/>
+            ))}
         <span style={{marginLeft:'auto',fontSize:10,color:'var(--text-muted)'}}>▾</span>
       </div>
       {open&&(
@@ -152,9 +170,18 @@ function ClientModal({ client, allMembers, onClose, onSave }) {
         assigned_cs_id: payload.assigned_cs_id,
         name: payload.name,
       }
-      const {error: coreError} = await supabase.from('clients').update(corePayload).eq('id', client.id)
+      const {data: coreData, error: coreError} = await supabase
+        .from('clients')
+        .update(corePayload)
+        .eq('id', client.id)
+        .select()
       if (coreError) {
         alert('Save failed: ' + coreError.message)
+        setSaving(false)
+        return
+      }
+      if (!coreData || coreData.length === 0) {
+        alert('Save did not apply — your account may not have permission to edit clients. Ask the CEO to check RLS policies for the clients table.')
         setSaving(false)
         return
       }
@@ -493,12 +520,22 @@ export default function ClientRoster() {
 
   async function archiveClient(client) {
     if (!confirm(`Archive "${client.name}"? It will be hidden but not deleted — you can restore it any time.`)) return
-    await supabase.from('clients').update({is_archived:true}).eq('id',client.id)
+    const { data, error } = await supabase.from('clients').update({is_archived:true}).eq('id',client.id).select()
+    if (error) { alert('Archive failed: ' + error.message); return }
+    if (!data || data.length === 0) {
+      alert('Archive did not apply — your account may not have permission to edit clients. Ask the CEO to check RLS policies for the clients table.')
+      return
+    }
     setClients(prev=>prev.map(c=>c.id===client.id?{...c,is_archived:true}:c))
   }
 
   async function restoreClient(client) {
-    await supabase.from('clients').update({is_archived:false}).eq('id',client.id)
+    const { data, error } = await supabase.from('clients').update({is_archived:false}).eq('id',client.id).select()
+    if (error) { alert('Restore failed: ' + error.message); return }
+    if (!data || data.length === 0) {
+      alert('Restore did not apply — your account may not have permission to edit clients. Ask the CEO to check RLS policies for the clients table.')
+      return
+    }
     setClients(prev=>prev.map(c=>c.id===client.id?{...c,is_archived:false}:c))
   }
 
