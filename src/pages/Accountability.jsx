@@ -3,7 +3,6 @@ import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { ChevronLeft, ChevronRight, Check, Minus } from 'lucide-react'
 
-// ── ITEMS ────────────────────────────────────────────────────
 const BOOL_ITEMS = [
   { key: 'monday_intentions',    label: 'Mon Intentions'   },
   { key: 'friday_reflections',   label: 'Fri Reflections'  },
@@ -15,7 +14,6 @@ const BOOL_ITEMS = [
 ]
 const SLACK_KEY = 'slack_participation'
 
-// ── DATE HELPERS (Monday-anchored, timezone safe) ───────────
 function toDateStr(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
@@ -47,7 +45,6 @@ function weekNum(mondayStr) {
   return Math.ceil(((d - jan1) / 86400000 + jan1.getDay() + 1) / 7)
 }
 
-// ── ROW (one team member) ───────────────────────────────────
 function MemberRow({ member, log, onChange }) {
   const initials = (member.full_name || '?').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
   const boolsDone = BOOL_ITEMS.filter(i => !!log?.[i.key]).length
@@ -59,7 +56,7 @@ function MemberRow({ member, log, onChange }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{
             width: 28, height: 28, borderRadius: '50%',
-            background: 'var(--accent-grad)', color: '#fff',
+            background: 'var(--accent-grad, linear-gradient(135deg,#8b6dff,#5b8cff))', color: '#fff',
             display: 'grid', placeItems: 'center',
             fontSize: 11, fontWeight: 700, flexShrink: 0
           }}>{initials}</div>
@@ -118,15 +115,14 @@ function MemberRow({ member, log, onChange }) {
   )
 }
 
-// ── MAIN PAGE ────────────────────────────────────────────────
 export default function Accountability() {
   const { profile, isManagement, isOps } = useAuth()
   const canEdit = isManagement || isOps
 
   const [members, setMembers] = useState([])
-  const [logs, setLogs] = useState({}) // keyed by user_id for the selected week
+  const [logs, setLogs] = useState({})
   const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(null) // user_id being saved
+  const [saving, setSaving] = useState(null)
   const [selectedWeek, setSelectedWeek] = useState(() => toDateStr(getLastMonday()))
 
   useEffect(() => { if (canEdit) load() }, [canEdit, selectedWeek])
@@ -148,7 +144,6 @@ export default function Accountability() {
     setSaving(userId)
     const existing = logs[userId] || {}
     const next = { ...existing, ...patch, user_id: userId, week_start: selectedWeek, logged_by: profile?.id }
-    // Optimistic update
     setLogs(prev => ({ ...prev, [userId]: { ...prev[userId], ...patch } }))
     const { data, error } = await supabase
       .from('accountability_logs')
@@ -159,7 +154,6 @@ export default function Accountability() {
       setLogs(prev => ({ ...prev, [userId]: data }))
     } else if (error) {
       console.error('Accountability save failed:', error.message)
-      // Roll back optimistic update on error
       setLogs(prev => ({ ...prev, [userId]: existing }))
     }
     setSaving(null)
@@ -173,7 +167,6 @@ export default function Accountability() {
   const canGoNext = !isCurrentOrFutureWeek(toDateStr(addWeeks(parseISODate(selectedWeek), 1)))
   const isLastWeek = selectedWeek === toDateStr(getLastMonday())
 
-  // Stats for the selected week
   const stats = useMemo(() => {
     const tot = members.length
     const fully = members.filter(m => {
@@ -236,7 +229,6 @@ export default function Accountability() {
       </div>
 
       <div className="page-body">
-        {/* Stats row */}
         <div className="stat-row">
           <div className="stat-box"><div className="stat-box-label">Team</div><div className="stat-box-value">{stats.tot}</div></div>
           <div className="stat-box"><div className="stat-box-label">Fully Accountable</div><div className="stat-box-value text-green">{stats.fully}</div></div>
@@ -244,7 +236,6 @@ export default function Accountability() {
           <div className="stat-box"><div className="stat-box-label">Week Completion</div><div className="stat-box-value text-accent">{stats.completion}%</div></div>
         </div>
 
-        {/* Log table */}
         <div className="table-wrap">
           <table>
             <thead>
