@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useTheme } from '../contexts/ThemeContext'
-import { LayoutDashboard, Target, Calendar, Video, LogOut, Settings, TrendingUp, Users, DollarSign, Menu, X, FileText, Trophy, Heart, UserCheck, Sun, Moon, ClipboardCheck, BarChart3, Compass } from 'lucide-react'
+import { LayoutDashboard, Target, Calendar, Video, LogOut, Settings, TrendingUp, Users, DollarSign, Menu, X, FileText, Trophy, Heart, UserCheck, Sun, Moon, ClipboardCheck, BarChart3, Compass, ShieldCheck } from 'lucide-react'
 
 export default function Layout() {
   const { profile, signOut, isCEO, isManagement, isOps } = useAuth()
@@ -55,6 +55,9 @@ export default function Layout() {
           <NavLink to="/changelog" className={nl}><FileText size={16}/> Change Log</NavLink>
           <NavLink to="/rewards" className={nl}><Trophy size={16}/> Rewards</NavLink>
           <NavLink to="/onboarding" className={nl}><ClipboardCheck size={16}/> Onboarding</NavLink>
+          {(isManagement || isOps) && (
+            <NavLink to="/accountability" className={nl}><ShieldCheck size={16}/> Accountability</NavLink>
+          )}
 
           {isManagement&&(
             <>
