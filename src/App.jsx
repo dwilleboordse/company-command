@@ -17,6 +17,7 @@ import ChangeLog from './pages/ChangeLog'
 import Rewards from './pages/Rewards'
 import Analytics from './pages/Analytics'
 import HundredDayPlan from './pages/HundredDayPlan'
+import Accountability from './pages/Accountability'
 
 function PR({ children, ceo=false, mgmt=false, ops=false }) {
   const { user, profile, loading, isOps } = useAuth()
@@ -42,6 +43,7 @@ function AppRoutes() {
         <Route path="spend" element={<SpendTracker/>}/>
         <Route path="changelog" element={<ChangeLog/>}/>
         <Route path="rewards" element={<Rewards/>}/>
+        <Route path="accountability" element={<PR mgmt ops><Accountability/></PR>}/>
         <Route path="clients" element={<PR mgmt ops><Clients/></PR>}/>
         <Route path="team-health" element={<PR mgmt ops><TeamHealth/></PR>}/>
         <Route path="analytics" element={<PR mgmt><Analytics/></PR>}/>
