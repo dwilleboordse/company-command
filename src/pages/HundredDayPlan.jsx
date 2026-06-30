@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import {
   Target, ListChecks, Route, ShieldAlert, CheckCircle2,
-  ChevronLeft, ChevronRight, Plus, X,
+  ChevronLeft, ChevronRight, Plus, X, Download,
   Pencil, Gauge, Flag, Lock, Check, Save
 } from "lucide-react";
 
@@ -594,6 +594,140 @@ export default function HundredDayPlan() {
     const committed = plans.filter(p => p.status === 'committed').length
     const drafts    = plans.filter(p => p.status === 'draft').length
 
+    // ── EXPORT HELPERS ─────────────────────────────────────
+    function downloadFile(name, text, type) {
+      try {
+        const b = new Blob([text], { type })
+        const url = URL.createObjectURL(b)
+        const a = document.createElement('a')
+        a.href = url; a.download = name
+        document.body.appendChild(a); a.click(); a.remove()
+        URL.revokeObjectURL(url)
+      } catch (e) { console.error('Download failed:', e) }
+    }
+
+    function buildMarkdown() {
+      const dateStr = new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+      const L = []
+      L.push(`# DDU Media — Team 100-Day Plans`)
+      L.push(`*Exported ${dateStr} · ${visible.length} plan${visible.length === 1 ? '' : 's'}*`)
+      L.push('')
+      visible.forEach((p, idx) => {
+        const m = members[p.user_id] || {}
+        const name = p.name || m.full_name || 'Unnamed'
+        const role = p.role || POSITION_LABELS[m.position] || m.position || ''
+        const dept = p.department || '—'
+        const status = p.status === 'committed' ? 'Committed' : 'Draft'
+        const window = (p.start_date && p.end_date)
+          ? `${fmtY(p.start_date)} → ${fmtY(p.end_date)}`
+          : '—'
+        const anchored = (okrCfg[p.department] || []).filter(o => (p.anchored_objective_ids || []).includes(o.id))
+
+        L.push(`---`); L.push('')
+        L.push(`## ${idx + 1}. ${name}${role ? ` · ${role}` : ''}`)
+        L.push(`**Department:** ${dept}  `)
+        L.push(`**Status:** ${status}  `)
+        L.push(`**Window:** ${window}  `)
+        L.push(`**Confidence:** ${p.confidence ?? '—'}/10  `)
+        L.push('')
+
+        if (anchored.length > 0) {
+          L.push(`### Anchored OKRs`)
+          anchored.forEach(o => L.push(`- ${o.objective}`))
+          L.push('')
+        }
+
+        if (Array.isArray(p.objectives) && p.objectives.length > 0) {
+          L.push(`### Objectives`)
+          p.objectives.forEach((o, i) => {
+            L.push(`**${i + 1}. ${o.statement || '—'}**`)
+            if (o.why) L.push(`*Why:* ${o.why}`)
+            const krs = Array.isArray(o.keyResults) ? o.keyResults.filter(k => k.metric?.trim()) : []
+            if (krs.length > 0) {
+              L.push('')
+              L.push(`*Key results:*`)
+              krs.forEach(k => {
+                const source = k.source ? ` _(${k.source})_` : ''
+                L.push(`- ${k.metric}: ${k.baseline || '?'} → ${k.target || '?'} ${k.unit || ''}${source}`)
+              })
+            }
+            if (o.lever) { L.push(''); L.push(`*Biggest lever:* ${o.lever}`) }
+            const inits = Array.isArray(o.initiatives) ? o.initiatives.filter(x => x?.trim()) : []
+            if (inits.length > 0) {
+              L.push('')
+              L.push(`*Gameplan:*`)
+              inits.forEach(x => L.push(`- ${x}`))
+            }
+            L.push('')
+          })
+        }
+
+        L.push(`### Checkpoints`)
+        L.push(`- **Day 25:** ${p.checkpoints?.d25 || '—'}`)
+        L.push(`- **Day 50:** ${p.checkpoints?.d50 || '—'}`)
+        L.push(`- **Day 75:** ${p.checkpoints?.d75 || '—'}`)
+        L.push('')
+
+        L.push(`### Risks & resourcing`)
+        L.push(`- **Blocker:** ${p.risks?.blocker || '—'}`)
+        L.push(`- **Needs:** ${p.risks?.need || '—'}`)
+        L.push(`- **Dependencies:** ${p.risks?.deps || '—'}`)
+        L.push('')
+      })
+      return L.join('\n')
+    }
+
+    function buildCSV() {
+      const escape = (v) => {
+        if (v == null) return ''
+        const s = String(v).replace(/"/g, '""')
+        return /[",\n]/.test(s) ? `"${s}"` : s
+      }
+      const headers = [
+        'Name','Role','Department','Status','Start','End','Confidence',
+        'Anchored OKRs','Objectives','Key Results','Levers','Gameplans',
+        'D25','D50','D75','Blocker','Needs','Dependencies','Last Updated',
+      ]
+      const rows = [headers]
+      visible.forEach(p => {
+        const m = members[p.user_id] || {}
+        const anchored = (okrCfg[p.department] || []).filter(o => (p.anchored_objective_ids || []).includes(o.id))
+        const objList   = (p.objectives || []).map(o => o.statement || '').filter(Boolean).join(' | ')
+        const krList    = (p.objectives || []).flatMap(o =>
+          (Array.isArray(o.keyResults) ? o.keyResults : [])
+            .filter(k => k.metric?.trim())
+            .map(k => `${o.statement || '?'} → ${k.metric}: ${k.baseline || '?'} → ${k.target || '?'} ${k.unit || ''}`.trim())
+        ).join(' | ')
+        const leverList = (p.objectives || []).filter(o => o.lever).map(o => o.lever).join(' | ')
+        const initList  = (p.objectives || []).flatMap(o => (Array.isArray(o.initiatives) ? o.initiatives : [])).filter(x => x?.trim()).join(' | ')
+        rows.push([
+          p.name || m.full_name || '',
+          p.role || POSITION_LABELS[m.position] || '',
+          p.department || '',
+          p.status || '',
+          p.start_date || '',
+          p.end_date || '',
+          p.confidence ?? '',
+          anchored.map(o => o.objective).join(' | '),
+          objList,
+          krList,
+          leverList,
+          initList,
+          p.checkpoints?.d25 || '',
+          p.checkpoints?.d50 || '',
+          p.checkpoints?.d75 || '',
+          p.risks?.blocker || '',
+          p.risks?.need || '',
+          p.risks?.deps || '',
+          p.updated_at ? new Date(p.updated_at).toISOString().slice(0,10) : '',
+        ])
+      })
+      return rows.map(r => r.map(escape).join(',')).join('\n')
+    }
+
+    const today = new Date().toISOString().slice(0, 10)
+    const stamp = filter === 'all' ? today : `${today}-${filter}`
+
     if (loading) return (
       <div className="hdp-team-toolbar" style={{ justifyContent: 'center' }}>
         <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)' }}>Loading team plans…</span>
@@ -606,12 +740,34 @@ export default function HundredDayPlan() {
           <div className="hdp-team-stats">
             <b>{plans.length}</b> plans · <b>{committed}</b> committed · <b>{drafts}</b> drafts
           </div>
-          <div className="hdp-tabs" style={{ margin: 0, border: 'none' }}>
-            {['all', 'committed', 'draft'].map(f => (
-              <button key={f} className={filter === f ? 'active' : ''} onClick={() => setFilter(f)}>
-                {f === 'all' ? 'All' : f === 'committed' ? 'Committed' : 'Drafts'}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+            <div className="hdp-tabs" style={{ margin: 0, border: 'none' }}>
+              {['all', 'committed', 'draft'].map(f => (
+                <button key={f} className={filter === f ? 'active' : ''} onClick={() => setFilter(f)}>
+                  {f === 'all' ? 'All' : f === 'committed' ? 'Committed' : 'Drafts'}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                className="hdp-btn ghost"
+                disabled={visible.length === 0}
+                onClick={() => downloadFile(`100-day-plans-${stamp}.md`, buildMarkdown(), 'text/markdown')}
+                title="Download a readable doc of every plan (good for printing or sharing)"
+                style={{ padding: '9px 14px', fontSize: 13 }}
+              >
+                <Download size={14} /> Markdown
               </button>
-            ))}
+              <button
+                className="hdp-btn ghost"
+                disabled={visible.length === 0}
+                onClick={() => downloadFile(`100-day-plans-${stamp}.csv`, buildCSV(), 'text/csv;charset=utf-8')}
+                title="Download CSV (good for spreadsheet analysis)"
+                style={{ padding: '9px 14px', fontSize: 13 }}
+              >
+                <Download size={14} /> CSV
+              </button>
+            </div>
           </div>
         </div>
 
