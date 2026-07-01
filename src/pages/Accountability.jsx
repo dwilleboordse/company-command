@@ -3,17 +3,26 @@ import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { ChevronLeft, ChevronRight, Check, Minus } from 'lucide-react'
 
-const BOOL_ITEMS = [
-  { key: 'monday_intentions',    label: 'Mon Intentions'   },
-  { key: 'friday_reflections',   label: 'Fri Reflections'  },
-  { key: 'mvp_votes',            label: 'MVP Votes'        },
-  { key: 'client_reports',       label: 'Client Reports'   },
-  { key: 'monthly_survey',       label: 'Monthly Survey'   },
-  { key: 'on_time_pod_calls',    label: 'On Time — Pod'    },
-  { key: 'on_time_client_calls', label: 'On Time — Client' },
+/* ── ITEMS ────────────────────────────────────────────────
+   Weekly booleans: click to toggle.
+   Client reports: 3-state (null | 'partial' | 'done'), cycle on click.
+   Monthly survey: boolean, but only appears on the first week of each month.
+   Slack participation: numeric 1–10.
+   ──────────────────────────────────────────────────────── */
+
+const COLUMNS = [
+  { type: 'bool',   key: 'monday_intentions',    label: 'Mon Intentions'    },
+  { type: 'bool',   key: 'friday_reflections',   label: 'Fri Reflections'   },
+  { type: 'bool',   key: 'mvp_votes',            label: 'MVP Votes'         },
+  { type: 'tri',    key: 'client_reports',       label: 'Client Reports'    },
+  { type: 'monthly',key: 'monthly_survey',       label: 'Monthly Survey'    },
+  { type: 'bool',   key: 'on_time_pod_calls',    label: 'Pod Attendance'    },
+  { type: 'bool',   key: 'on_time_client_calls', label: 'Client Attendance' },
 ]
+
 const SLACK_KEY = 'slack_participation'
 
+// ── DATE HELPERS (Monday-anchored, timezone safe) ────────
 function toDateStr(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
@@ -34,6 +43,10 @@ function addWeeks(d, n) { const r = new Date(d); r.setDate(r.getDate() + n * 7);
 function isCurrentOrFutureWeek(dateStr) {
   return dateStr >= toDateStr(getMondayOfWeek(new Date()))
 }
+// "First week of the month" = the Monday of that week falls in days 1–7
+function isFirstWeekOfMonth(mondayStr) {
+  return parseISODate(mondayStr).getDate() <= 7
+}
 function weekLabel(mondayStr) {
   const start = parseISODate(mondayStr); const end = parseISODate(mondayStr); end.setDate(end.getDate() + 6)
   const fmt = (d) => `${d.toLocaleString('default', { month: 'short' })} ${d.getDate()}`
@@ -45,9 +58,27 @@ function weekNum(mondayStr) {
   return Math.ceil(((d - jan1) / 86400000 + jan1.getDay() + 1) / 7)
 }
 
-function MemberRow({ member, log, onChange }) {
+// ── SCORE HELPER ────────────────────────────────────────
+function scoreLog(log, monthlyVisible) {
+  let earned = 0, total = 0
+  COLUMNS.forEach(c => {
+    if (c.type === 'monthly' && !monthlyVisible) return
+    total += 1
+    const v = log?.[c.key]
+    if (c.type === 'bool' || c.type === 'monthly') {
+      if (v) earned += 1
+    } else if (c.type === 'tri') {
+      if (v === 'done') earned += 1
+      else if (v === 'partial') earned += 0.5
+    }
+  })
+  return { earned, total }
+}
+
+// ── ROW ──────────────────────────────────────────────────
+function MemberRow({ member, log, onChange, monthlyVisible }) {
   const initials = (member.full_name || '?').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
-  const boolsDone = BOOL_ITEMS.filter(i => !!log?.[i.key]).length
+  const { earned, total } = scoreLog(log, monthlyVisible)
   const slack = log?.[SLACK_KEY] ?? null
 
   return (
@@ -69,13 +100,37 @@ function MemberRow({ member, log, onChange }) {
         </div>
       </td>
 
-      {BOOL_ITEMS.map(item => {
-        const checked = !!log?.[item.key]
+      {COLUMNS.filter(c => c.type !== 'monthly' || monthlyVisible).map(c => {
+        if (c.type === 'tri') {
+          const v = log?.[c.key] ?? null
+          const next = v === null || v === undefined ? 'partial'
+                     : v === 'partial' ? 'done'
+                     : null
+          const style = {
+            width: 30, height: 26, borderRadius: 7,
+            border: v ? 'none' : '1.5px solid var(--border)',
+            background: v === 'done' ? 'var(--green-dim)' : v === 'partial' ? 'var(--amber-dim)' : 'transparent',
+            color: v === 'done' ? 'var(--green)' : v === 'partial' ? 'var(--amber)' : 'var(--text-muted)',
+            display: 'inline-grid', placeItems: 'center', cursor: 'pointer',
+            fontSize: 12, fontWeight: 700, transition: 'all 0.12s',
+          }
+          const label = v === 'done' ? 'Done' : v === 'partial' ? 'Partial' : 'Not done — click to cycle'
+          const glyph = v === 'done' ? '✓' : v === 'partial' ? '½' : '—'
+          return (
+            <td key={c.key} style={{ textAlign: 'center' }}>
+              <button onClick={() => onChange(member.id, { [c.key]: next })} title={label} style={style}>
+                {glyph}
+              </button>
+            </td>
+          )
+        }
+        // bool + monthly render the same
+        const checked = !!log?.[c.key]
         return (
-          <td key={item.key} style={{ textAlign: 'center' }}>
+          <td key={c.key} style={{ textAlign: 'center' }}>
             <button
-              onClick={() => onChange(member.id, { [item.key]: !checked })}
-              title={item.label}
+              onClick={() => onChange(member.id, { [c.key]: !checked })}
+              title={c.label}
               style={{
                 width: 26, height: 26, borderRadius: 7,
                 border: checked ? 'none' : '1.5px solid var(--border)',
@@ -104,17 +159,18 @@ function MemberRow({ member, log, onChange }) {
       <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
         <span style={{
           fontSize: 12, fontWeight: 600,
-          color: boolsDone === BOOL_ITEMS.length
+          color: earned === total && total > 0
             ? 'var(--green)'
-            : boolsDone >= 5 ? 'var(--amber)' : 'var(--text-muted)',
+            : earned >= total * 0.7 ? 'var(--amber)' : 'var(--text-muted)',
         }}>
-          {boolsDone}/{BOOL_ITEMS.length}
+          {earned % 1 === 0 ? earned : earned.toFixed(1)}/{total}
         </span>
       </td>
     </tr>
   )
 }
 
+// ── MAIN PAGE ────────────────────────────────────────────
 export default function Accountability() {
   const { profile, isManagement, isOps } = useAuth()
   const canEdit = isManagement || isOps
@@ -124,6 +180,8 @@ export default function Accountability() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(null)
   const [selectedWeek, setSelectedWeek] = useState(() => toDateStr(getLastMonday()))
+
+  const monthlyVisible = isFirstWeekOfMonth(selectedWeek)
 
   useEffect(() => { if (canEdit) load() }, [canEdit, selectedWeek])
 
@@ -169,25 +227,17 @@ export default function Accountability() {
 
   const stats = useMemo(() => {
     const tot = members.length
-    const fully = members.filter(m => {
-      const l = logs[m.id]
-      return l && BOOL_ITEMS.every(i => l[i.key])
-    }).length
-    const missingAny = members.filter(m => {
-      const l = logs[m.id]
-      return !l || BOOL_ITEMS.some(i => !l[i.key])
-    }).length
-    let totBools = 0, doneBools = 0
+    let fully = 0, missingAny = 0, totItems = 0, doneItems = 0
     members.forEach(m => {
-      const l = logs[m.id]
-      BOOL_ITEMS.forEach(i => {
-        totBools++
-        if (l?.[i.key]) doneBools++
-      })
+      const { earned, total } = scoreLog(logs[m.id], monthlyVisible)
+      totItems += total
+      doneItems += earned
+      if (total > 0 && earned === total) fully += 1
+      else missingAny += 1
     })
-    const completion = totBools > 0 ? Math.round((doneBools / totBools) * 100) : 0
+    const completion = totItems > 0 ? Math.round((doneItems / totItems) * 100) : 0
     return { tot, fully, missingAny, completion }
-  }, [members, logs])
+  }, [members, logs, monthlyVisible])
 
   if (!canEdit) {
     return (
@@ -196,6 +246,8 @@ export default function Accountability() {
       </div>
     )
   }
+
+  const visibleColumns = COLUMNS.filter(c => c.type !== 'monthly' || monthlyVisible)
 
   return (
     <>
@@ -219,6 +271,7 @@ export default function Accountability() {
               </div>
               <div style={{ fontSize: 10, color: isLastWeek ? 'var(--green)' : 'var(--text-muted)', marginTop: 1 }}>
                 {isLastWeek ? '✓ Last week' : 'Historical'}
+                {monthlyVisible && <span style={{ marginLeft: 6, color: 'var(--accent)' }}>· Monthly week</span>}
               </div>
             </div>
             <button onClick={nextWeek} disabled={!canGoNext} style={{ padding: '8px 12px', border: 'none', background: 'transparent', cursor: canGoNext ? 'pointer' : 'not-allowed', color: canGoNext ? 'var(--text-secondary)' : 'var(--border)', display: 'flex', alignItems: 'center' }}>
@@ -241,23 +294,36 @@ export default function Accountability() {
             <thead>
               <tr>
                 <th style={{ minWidth: 200 }}>Team member</th>
-                {BOOL_ITEMS.map(i => <th key={i.key} style={{ textAlign: 'center', fontSize: 10 }}>{i.label}</th>)}
-                <th style={{ textAlign: 'center' }}>Slack 1–10</th>
+                {visibleColumns.map(c => <th key={c.key} style={{ textAlign: 'center', fontSize: 10 }}>{c.label}</th>)}
+                <th style={{ textAlign: 'center' }}>Slack Participation 1–10</th>
                 <th style={{ textAlign: 'right' }}>Score</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={BOOL_ITEMS.length + 3} style={{ textAlign: 'center', padding: 32 }}>
+                <tr><td colSpan={visibleColumns.length + 3} style={{ textAlign: 'center', padding: 32 }}>
                   <div className="spinner" style={{ display: 'inline-block' }} />
                 </td></tr>
               ) : members.length === 0 ? (
-                <tr><td colSpan={BOOL_ITEMS.length + 3}><div className="empty-state"><p>No team members found.</p></div></td></tr>
+                <tr><td colSpan={visibleColumns.length + 3}><div className="empty-state"><p>No team members found.</p></div></td></tr>
               ) : members.map(m => (
-                <MemberRow key={m.id} member={m} log={logs[m.id]} onChange={handleChange} />
+                <MemberRow key={m.id} member={m} log={logs[m.id]} onChange={handleChange} monthlyVisible={monthlyVisible} />
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* Legend + note when monthly column is hidden */}
+        <div style={{
+          marginTop: 14, display: 'flex', alignItems: 'center', gap: 22, flexWrap: 'wrap',
+          fontSize: 11, color: 'var(--text-muted)',
+        }}>
+          <span><b style={{ color: 'var(--text-primary)' }}>Client Reports:</b> click to cycle — <span style={{ color: 'var(--text-muted)' }}>—</span> not done, <span style={{ color: 'var(--amber)' }}>½</span> partial, <span style={{ color: 'var(--green)' }}>✓</span> done</span>
+          {!monthlyVisible && (
+            <span style={{ color: 'var(--accent)' }}>
+              Monthly Survey column only appears during the first week of each month.
+            </span>
+          )}
         </div>
 
         {saving && (
