@@ -11,14 +11,15 @@ import { ChevronLeft, ChevronRight, Check, Minus } from 'lucide-react'
    ──────────────────────────────────────────────────────── */
 
 const COLUMNS = [
-  { type: 'bool',   key: 'monday_intentions',    label: 'Mon Intentions'    },
-  { type: 'bool',   key: 'friday_reflections',   label: 'Fri Reflections'   },
-  { type: 'bool',   key: 'mvp_votes',            label: 'MVP Votes'         },
-  { type: 'tri',    key: 'client_reports',       label: 'Client Reports'    },
-  { type: 'monthly',key: 'monthly_survey',       label: 'Monthly Survey'    },
-  { type: 'bool',   key: 'on_time_pod_calls',    label: 'Pod Attendance'    },
-  { type: 'bool',   key: 'on_time_client_calls', label: 'Client Attendance' },
+  { type: 'bool',         key: 'monday_intentions',    label: 'Mon Intentions'         },
+  { type: 'bool',         key: 'friday_reflections',   label: 'Fri Reflections'        },
+  { type: 'bool',         key: 'mvp_votes',            label: 'MVP Votes'              },
+  { type: 'monthly-tri',  key: 'client_reports',       label: 'Monthly Client Report'  },
+  { type: 'monthly-bool', key: 'monthly_survey',       label: 'Monthly Survey'         },
+  { type: 'bool',         key: 'on_time_pod_calls',    label: 'Pod Attendance'         },
+  { type: 'bool',         key: 'on_time_client_calls', label: 'Client Attendance'      },
 ]
+const isMonthlyType = (t) => t === 'monthly-bool' || t === 'monthly-tri'
 
 const SLACK_KEY = 'slack_participation'
 
@@ -40,8 +41,9 @@ function getLastMonday() {
   d.setDate(d.getDate() - diff); d.setHours(0, 0, 0, 0); return d
 }
 function addWeeks(d, n) { const r = new Date(d); r.setDate(r.getDate() + n * 7); return r }
-function isCurrentOrFutureWeek(dateStr) {
-  return dateStr >= toDateStr(getMondayOfWeek(new Date()))
+// Only true for weeks strictly after the current week (the current week is fine — that's what we log during)
+function isFutureWeek(dateStr) {
+  return dateStr > toDateStr(getMondayOfWeek(new Date()))
 }
 // "First week of the month" = the Monday of that week falls in days 1–7
 function isFirstWeekOfMonth(mondayStr) {
@@ -62,12 +64,12 @@ function weekNum(mondayStr) {
 function scoreLog(log, monthlyVisible) {
   let earned = 0, total = 0
   COLUMNS.forEach(c => {
-    if (c.type === 'monthly' && !monthlyVisible) return
+    if (isMonthlyType(c.type) && !monthlyVisible) return
     total += 1
     const v = log?.[c.key]
-    if (c.type === 'bool' || c.type === 'monthly') {
+    if (c.type === 'bool' || c.type === 'monthly-bool') {
       if (v) earned += 1
-    } else if (c.type === 'tri') {
+    } else if (c.type === 'monthly-tri') {
       if (v === 'done') earned += 1
       else if (v === 'partial') earned += 0.5
     }
@@ -100,8 +102,8 @@ function MemberRow({ member, log, onChange, monthlyVisible }) {
         </div>
       </td>
 
-      {COLUMNS.filter(c => c.type !== 'monthly' || monthlyVisible).map(c => {
-        if (c.type === 'tri') {
+      {COLUMNS.filter(c => !isMonthlyType(c.type) || monthlyVisible).map(c => {
+        if (c.type === 'monthly-tri') {
           const v = log?.[c.key] ?? null
           const next = v === null || v === undefined ? 'partial'
                      : v === 'partial' ? 'done'
@@ -179,7 +181,8 @@ export default function Accountability() {
   const [logs, setLogs] = useState({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(null)
-  const [selectedWeek, setSelectedWeek] = useState(() => toDateStr(getLastMonday()))
+  // Default to the CURRENT week — team logs during the week, not after
+  const [selectedWeek, setSelectedWeek] = useState(() => toDateStr(getMondayOfWeek(new Date())))
 
   const monthlyVisible = isFirstWeekOfMonth(selectedWeek)
 
@@ -220,10 +223,13 @@ export default function Accountability() {
   function prevWeek() { setSelectedWeek(w => toDateStr(addWeeks(parseISODate(w), -1))) }
   function nextWeek() {
     const next = toDateStr(addWeeks(parseISODate(selectedWeek), 1))
-    if (!isCurrentOrFutureWeek(next)) setSelectedWeek(next)
+    if (!isFutureWeek(next)) setSelectedWeek(next)
   }
-  const canGoNext = !isCurrentOrFutureWeek(toDateStr(addWeeks(parseISODate(selectedWeek), 1)))
-  const isLastWeek = selectedWeek === toDateStr(getLastMonday())
+  const canGoNext = !isFutureWeek(toDateStr(addWeeks(parseISODate(selectedWeek), 1)))
+  const thisWeekStr = toDateStr(getMondayOfWeek(new Date()))
+  const lastWeekStr = toDateStr(getLastMonday())
+  const isThisWeek  = selectedWeek === thisWeekStr
+  const isLastWeek  = selectedWeek === lastWeekStr
 
   const stats = useMemo(() => {
     const tot = members.length
@@ -247,7 +253,7 @@ export default function Accountability() {
     )
   }
 
-  const visibleColumns = COLUMNS.filter(c => c.type !== 'monthly' || monthlyVisible)
+  const visibleColumns = COLUMNS.filter(c => !isMonthlyType(c.type) || monthlyVisible)
 
   return (
     <>
@@ -269,8 +275,11 @@ export default function Accountability() {
               <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>
                 W{weekNum(selectedWeek)} · {weekLabel(selectedWeek)}
               </div>
-              <div style={{ fontSize: 10, color: isLastWeek ? 'var(--green)' : 'var(--text-muted)', marginTop: 1 }}>
-                {isLastWeek ? '✓ Last week' : 'Historical'}
+              <div style={{
+                fontSize: 10, marginTop: 1,
+                color: isThisWeek ? 'var(--accent)' : isLastWeek ? 'var(--green)' : 'var(--text-muted)',
+              }}>
+                {isThisWeek ? '● This week' : isLastWeek ? '✓ Last week' : 'Historical'}
                 {monthlyVisible && <span style={{ marginLeft: 6, color: 'var(--accent)' }}>· Monthly week</span>}
               </div>
             </div>
@@ -318,10 +327,10 @@ export default function Accountability() {
           marginTop: 14, display: 'flex', alignItems: 'center', gap: 22, flexWrap: 'wrap',
           fontSize: 11, color: 'var(--text-muted)',
         }}>
-          <span><b style={{ color: 'var(--text-primary)' }}>Client Reports:</b> click to cycle — <span style={{ color: 'var(--text-muted)' }}>—</span> not done, <span style={{ color: 'var(--amber)' }}>½</span> partial, <span style={{ color: 'var(--green)' }}>✓</span> done</span>
+          <span><b style={{ color: 'var(--text-primary)' }}>Monthly Client Report:</b> click to cycle — <span style={{ color: 'var(--text-muted)' }}>—</span> not done, <span style={{ color: 'var(--amber)' }}>½</span> partial, <span style={{ color: 'var(--green)' }}>✓</span> done</span>
           {!monthlyVisible && (
             <span style={{ color: 'var(--accent)' }}>
-              Monthly Survey column only appears during the first week of each month.
+              Monthly Client Report and Monthly Survey columns only appear during the first week of each month.
             </span>
           )}
         </div>
