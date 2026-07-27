@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
+import { getClientStrategistIds, getClientStrategistNames } from '../lib/clientAssignments'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from 'recharts'
 import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Edit2, Check, EyeOff, Pause, Play } from 'lucide-react'
 import { weekLabel, weekNum } from '../lib/dates'
@@ -80,6 +81,32 @@ function isFutureWeek(dateStr) {
   const now = new Date()
   const monday = getMondayOfWeek(now)
   return dateStr > toDateStr(monday)
+}
+
+async function fetchSpendTrackerData() {
+  const [clientResult, memberResult] = await Promise.all([
+    // Include legacy inactive clients so they can be viewed and restored from the paused drawer.
+    supabase.from('clients').select('*').order('name'),
+    supabase.from('profiles').select('id,full_name,position,is_active').eq('is_active', true).order('full_name'),
+  ])
+  const allClients = clientResult.data || []
+  const activeMembers = (memberResult.data || []).filter(member => member.is_active === true)
+  const entryMap = {}
+
+  if (allClients.length) {
+    const { data: entryData, error: entryError } = await supabase.from('spend_entries').select('*')
+      .in('client_id', allClients.map(client => client.id))
+      .order('week_start', { ascending: false })
+    entryData?.forEach(entry => {
+      if (!entryMap[entry.client_id]) entryMap[entry.client_id] = []
+      entryMap[entry.client_id].push(entry)
+    })
+    if (entryError) console.error('Spend entries failed to load:', entryError.message)
+  }
+  if (clientResult.error) console.error('Spend Tracker clients failed to load:', clientResult.error.message)
+  if (memberResult.error) console.error('Spend Tracker members failed to load:', memberResult.error.message)
+
+  return { clients: allClients, members: activeMembers, entries: entryMap }
 }
 
 // ── LOG MODAL ────────────────────────────────────────────────
@@ -219,7 +246,7 @@ function LogModal({ client, existing, weekStart, onClose, onSave }) {
 }
 
 // ── CLIENT ROW ───────────────────────────────────────────────
-function ClientRow({ client, entries, selectedWeek, onLog, canPause, isUpdating, onPause }) {
+function ClientRow({ client, entries, selectedWeek, strategistNames, onLog, canPause, isUpdating, onPause }) {
   const [expanded, setExpanded] = useState(false)
   const thisEntry = entries?.find(e => e.week_start === selectedWeek)
   const isLogged = !!(thisEntry?.total_spend > 0)
@@ -248,6 +275,13 @@ function ClientRow({ client, entries, selectedWeek, onLog, canPause, isUpdating,
           <div style={{flex:1,minWidth:0}}>
             <div className="flex items-center gap-2" style={{flexWrap:'wrap',marginBottom:4}}>
               <span style={{fontSize:14,fontWeight:700,color:'var(--text-primary)'}}>{client.name}</span>
+              <span
+                title={strategistNames.length ? `Creative Strategist: ${strategistNames.join(', ')}` : 'No Creative Strategist assigned in Client Roster'}
+                style={{fontSize:10,fontFamily:'var(--font-mono)',color:strategistNames.length?'var(--green)':'var(--text-muted)',
+                  background:strategistNames.length?'var(--green-dim)':'var(--bg)',padding:'2px 8px',borderRadius:100,
+                  border:`1px solid ${strategistNames.length?'var(--green)':'var(--border)'}`}}>
+                CS: {strategistNames.length ? strategistNames.join(', ') : 'Unassigned'}
+              </span>
               {isLogged
                 ? <span style={{display:'inline-flex',alignItems:'center',gap:4,fontSize:10,fontFamily:'var(--font-mono)',fontWeight:600,color:status.color,background:status.bg,padding:'2px 8px',borderRadius:100}}>
                     <Check size={9}/> Logged
@@ -355,7 +389,7 @@ function ClientRow({ client, entries, selectedWeek, onLog, canPause, isUpdating,
 }
 
 // ── PAUSED CLIENTS ──────────────────────────────────────────
-function PausedClientsPanel({ clients, entries, expanded, onToggle, canManage, updatingClientId, onUnpause }) {
+function PausedClientsPanel({ clients, entries, members, expanded, onToggle, canManage, updatingClientId, onUnpause }) {
   if (!clients.length) return null
 
   return (
@@ -387,6 +421,7 @@ function PausedClientsPanel({ clients, entries, expanded, onToggle, canManage, u
           {clients.map((client,index)=>{
             const clientEntries = entries[client.id]||[]
             const latestEntry = clientEntries.find(entry=>entry.total_spend>0)
+            const strategistNames = getClientStrategistNames(client,members)
             return (
               <div key={client.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,
                 padding:'12px 16px',borderBottom:index<clients.length-1?'1px solid var(--border)':'none'}}>
@@ -397,6 +432,7 @@ function PausedClientsPanel({ clients, entries, expanded, onToggle, canManage, u
                       border:'1px solid var(--border)',fontSize:9,fontFamily:'var(--font-mono)'}}>Paused</span>
                   </div>
                   <div style={{fontSize:10,color:'var(--text-muted)',fontFamily:'var(--font-mono)',marginTop:3}}>
+                    CS: {strategistNames.length ? strategistNames.join(', ') : 'Unassigned'} ·{' '}
                     {latestEntry
                       ? `Last logged W${weekNum(latestEntry.week_start)} · DDU ${fmtMoney(latestEntry.ddu_spend)} / Total ${fmtMoney(latestEntry.total_spend)} · ${clientEntries.length} entr${clientEntries.length===1?'y':'ies'} saved`
                       : 'No spend history logged'}
@@ -438,29 +474,31 @@ export default function SpendTracker() {
   const [selectedWeek, setSelectedWeek] = useState(() => toDateStr(getLastMonday()))
   const [selectedMonth, setSelectedMonth] = useState(() => getMonthStart(new Date()))
 
-  useEffect(() => { if (profile?.id) load() }, [profile?.id])
-
-  async function load() {
+  const load = useCallback(async () => {
     if (!profile?.id) return
-    setLoading(true)
-    const [{ data:clientData }, { data:memberData }] = await Promise.all([
-      // Include legacy inactive clients so they can be viewed and restored from the paused drawer.
-      supabase.from('clients').select('*').order('name'),
-      supabase.from('profiles').select('id,full_name,position').eq('is_active', true).order('full_name'),
-    ])
-    const allClients = clientData||[]
-    setClients(allClients)
-    setMembers(memberData||[])
-    if (clientData?.length) {
-      const { data:entryData } = await supabase.from('spend_entries').select('*')
-        .in('client_id', clientData.map(c=>c.id))
-        .order('week_start', {ascending:false})
-      const map = {}
-      entryData?.forEach(e => { if(!map[e.client_id]) map[e.client_id]=[]; map[e.client_id].push(e) })
-      setEntries(map)
-    }
+    const next = await fetchSpendTrackerData()
+    setClients(next.clients)
+    setMembers(next.members)
+    setEntries(next.entries)
     setLoading(false)
-  }
+  }, [profile?.id])
+
+  useEffect(() => {
+    if (!profile?.id) return
+    let cancelled = false
+
+    async function loadInitialData() {
+      const next = await fetchSpendTrackerData()
+      if (cancelled) return
+      setClients(next.clients)
+      setMembers(next.members)
+      setEntries(next.entries)
+      setLoading(false)
+    }
+
+    loadInitialData()
+    return () => { cancelled = true }
+  }, [profile?.id])
 
   async function setClientPaused(client, isPaused) {
     if (!isManagement && !isOps) return
@@ -543,7 +581,7 @@ export default function SpendTracker() {
     if (search && !c.name.toLowerCase().includes(search.toLowerCase())) return false
     // CS filter
     if (csFilter !== 'all') {
-      const ids = Array.isArray(c.cs_ids) ? c.cs_ids : (c.cs_ids ? (() => { try { return JSON.parse(c.cs_ids) } catch { return [] } })() : [])
+      const ids = getClientStrategistIds(c)
       if (!ids.includes(csFilter)) return false
     }
     const e = entries[c.id]?.find(x=>x.week_start===selectedWeek)
@@ -567,7 +605,7 @@ export default function SpendTracker() {
   const monthlyClients = activeClients.filter(c => {
     if (search && !c.name.toLowerCase().includes(search.toLowerCase())) return false
     if (csFilter !== 'all') {
-      const ids = Array.isArray(c.cs_ids) ? c.cs_ids : (c.cs_ids ? (() => { try { return JSON.parse(c.cs_ids) } catch { return [] } })() : [])
+      const ids = getClientStrategistIds(c)
       if (!ids.includes(csFilter)) return false
     }
     return true
@@ -712,6 +750,7 @@ export default function SpendTracker() {
                 <ClientRow key={client.id} client={client}
                   entries={entries[client.id]||[]}
                   selectedWeek={selectedWeek}
+                  strategistNames={getClientStrategistNames(client,members)}
                   onLog={(c,e)=>{ setLogClient(c); setLogExisting(e||null) }}
                   canPause={isManagement||isOps}
                   isUpdating={updatingClientId===client.id}
@@ -752,7 +791,12 @@ export default function SpendTracker() {
                       if (!mPct&&!clientMonthEntries.length&&search&&!client.name.toLowerCase().includes(search.toLowerCase())) return null
                       return (
                         <tr key={client.id}>
-                          <td style={{fontWeight:600}}>{client.name}</td>
+                          <td>
+                            <div style={{fontWeight:600}}>{client.name}</div>
+                            <div style={{fontSize:10,color:'var(--text-muted)',fontFamily:'var(--font-mono)',marginTop:2}}>
+                              CS: {getClientStrategistNames(client,members).join(', ')||'Unassigned'}
+                            </div>
+                          </td>
                           <td style={{fontFamily:'var(--font-mono)',color:'var(--accent)'}}>{mTotal>0?fmtMoney(mDDU):'—'}</td>
                           <td style={{fontFamily:'var(--font-mono)'}}>{mTotal>0?fmtMoney(mTotal):'—'}</td>
                           <td>
@@ -792,6 +836,7 @@ export default function SpendTracker() {
           <PausedClientsPanel
             clients={pausedClients}
             entries={entries}
+            members={members}
             expanded={showPaused}
             onToggle={()=>setShowPaused(value=>!value)}
             canManage={isManagement||isOps}

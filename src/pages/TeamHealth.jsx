@@ -231,19 +231,31 @@ export default function TeamHealth() {
   const [riskFilter, setRiskFilter] = useState('all')
   const [deptFilter, setDeptFilter] = useState('all')
 
-  useEffect(()=>{load()},[])
+  useEffect(()=>{
+    let cancelled=false
 
-  async function load() {
-    setLoading(true)
-    const {data:memberData}=await supabase.from('profiles').select('*').eq('is_active',true).eq('role','athlete').order('full_name')
-    setMembers(memberData||[])
-    if (memberData?.length) {
-      const {data:reviewData}=await supabase.from('team_reviews').select('*').in('reviewee_id',memberData.map(m=>m.id)).order('week_start',{ascending:false})
-      const map={}; reviewData?.forEach(r=>{if(!map[r.reviewee_id])map[r.reviewee_id]=[];map[r.reviewee_id].push(r)})
-      setReviews(map)
+    async function loadTeamHealth() {
+      setLoading(true)
+      const {data:memberData,error:memberError}=await supabase.from('profiles').select('*').eq('is_active',true).eq('role','athlete').order('full_name')
+      const activeMembers=(memberData||[]).filter(member=>member.is_active===true&&member.full_name)
+      let nextReviews={}
+
+      if (activeMembers.length) {
+        const {data:reviewData,error:reviewError}=await supabase.from('team_reviews').select('*').in('reviewee_id',activeMembers.map(m=>m.id)).order('week_start',{ascending:false})
+        reviewData?.forEach(r=>{if(!nextReviews[r.reviewee_id])nextReviews[r.reviewee_id]=[];nextReviews[r.reviewee_id].push(r)})
+        if (reviewError) console.error('Team Health reviews failed to load:',reviewError.message)
+      }
+      if (memberError) console.error('Team Health members failed to load:',memberError.message)
+      if (cancelled) return
+
+      setMembers(activeMembers)
+      setReviews(nextReviews)
+      setLoading(false)
     }
-    setLoading(false)
-  }
+
+    loadTeamHealth()
+    return ()=>{cancelled=true}
+  },[])
 
   if (!isManagement && !isOps) return <div className="page-body" style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'60vh'}}><p className="text-muted">Management access only.</p></div>
 

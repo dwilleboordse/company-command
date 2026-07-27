@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
+import { getClientStrategistIds } from '../lib/clientAssignments'
 import { ChevronLeft, ChevronRight, Check, Minus } from 'lucide-react'
 
 /* ── ITEMS ────────────────────────────────────────────────
@@ -11,6 +12,7 @@ import { ChevronLeft, ChevronRight, Check, Minus } from 'lucide-react'
    ──────────────────────────────────────────────────────── */
 
 const COLUMNS = [
+  { type: 'bool',         key: 'weekly_update_sent',   label: 'Weekly Update Sent'    },
   { type: 'bool',         key: 'monday_intentions',    label: 'Mon Intentions'         },
   { type: 'bool',         key: 'friday_reflections',   label: 'Fri Reflections'        },
   { type: 'bool',         key: 'mvp_votes',            label: 'MVP Votes'              },
@@ -61,7 +63,7 @@ function weekNum(mondayStr) {
 }
 
 // ── SCORE HELPER ────────────────────────────────────────
-function scoreLog(log, monthlyVisible) {
+function scoreLog(log, monthlyVisible, spendStatus) {
   let earned = 0, total = 0
   COLUMNS.forEach(c => {
     if (isMonthlyType(c.type) && !monthlyVisible) return
@@ -74,13 +76,17 @@ function scoreLog(log, monthlyVisible) {
       else if (v === 'partial') earned += 0.5
     }
   })
+  if (spendStatus?.total > 0) {
+    total += 1
+    if (spendStatus.complete) earned += 1
+  }
   return { earned, total }
 }
 
 // ── ROW ──────────────────────────────────────────────────
-function MemberRow({ member, log, onChange, monthlyVisible }) {
+function MemberRow({ member, log, onChange, monthlyVisible, spendStatus }) {
   const initials = (member.full_name || '?').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
-  const { earned, total } = scoreLog(log, monthlyVisible)
+  const { earned, total } = scoreLog(log, monthlyVisible, spendStatus)
   const slack = log?.[SLACK_KEY] ?? null
 
   return (
@@ -148,6 +154,31 @@ function MemberRow({ member, log, onChange, monthlyVisible }) {
       })}
 
       <td style={{ textAlign: 'center' }}>
+        {member.position !== 'creative_strategist' ? (
+          <span style={{ color: 'var(--text-muted)' }}>—</span>
+        ) : spendStatus?.total > 0 ? (
+          <span
+            title={spendStatus.complete
+              ? `All ${spendStatus.total} assigned clients logged for W${weekNum(spendStatus.weekStart)}`
+              : `${spendStatus.logged} of ${spendStatus.total} assigned clients logged for W${weekNum(spendStatus.weekStart)}`}
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+              minWidth: 48, height: 26, padding: '0 8px', borderRadius: 7,
+              background: spendStatus.complete ? 'var(--green-dim)' : 'transparent',
+              border: spendStatus.complete ? 'none' : '1.5px solid var(--border)',
+              color: spendStatus.complete ? 'var(--green)' : 'var(--text-muted)',
+              fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+            }}
+          >
+            {spendStatus.complete ? <Check size={14} strokeWidth={3} /> : <Minus size={12} />}
+            {spendStatus.logged}/{spendStatus.total}
+          </span>
+        ) : (
+          <span title="No active clients assigned" style={{ color: 'var(--text-muted)' }}>—</span>
+        )}
+      </td>
+
+      <td style={{ textAlign: 'center' }}>
         <select
           value={slack ?? ''}
           onChange={e => onChange(member.id, { [SLACK_KEY]: e.target.value === '' ? null : Number(e.target.value) })}
@@ -179,6 +210,8 @@ export default function Accountability() {
 
   const [members, setMembers] = useState([])
   const [logs, setLogs] = useState({})
+  const [clients, setClients] = useState([])
+  const [spendEntries, setSpendEntries] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(null)
   // Default to the CURRENT week — team logs during the week, not after
@@ -186,20 +219,42 @@ export default function Accountability() {
 
   const monthlyVisible = isFirstWeekOfMonth(selectedWeek)
 
-  useEffect(() => { if (canEdit) load() }, [canEdit, selectedWeek])
+  useEffect(() => {
+    if (!canEdit) return
+    let cancelled = false
 
-  async function load() {
-    setLoading(true)
-    const [{ data: memberData }, { data: logData }] = await Promise.all([
-      supabase.from('profiles').select('id,full_name,position,role').eq('is_active', true).order('full_name'),
-      supabase.from('accountability_logs').select('*').eq('week_start', selectedWeek),
-    ])
-    setMembers((memberData || []).filter(m => m.full_name))
-    const map = {}
-    ;(logData || []).forEach(l => { map[l.user_id] = l })
-    setLogs(map)
-    setLoading(false)
-  }
+    async function loadAccountability() {
+      setLoading(true)
+      const spendWeek = toDateStr(addWeeks(parseISODate(selectedWeek), -1))
+      const [memberResult, logResult, clientResult, spendResult] = await Promise.all([
+        supabase.from('profiles').select('id,full_name,position,role,is_active').eq('is_active', true).order('full_name'),
+        supabase.from('accountability_logs').select('*').eq('week_start', selectedWeek),
+        supabase.from('clients')
+          .select('id,name,cs_ids,assigned_cs_id,is_active,is_archived')
+          .eq('is_active', true)
+          .or('is_archived.is.null,is_archived.eq.false'),
+        supabase.from('spend_entries')
+          .select('client_id,week_start,total_spend')
+          .eq('week_start', spendWeek),
+      ])
+      if (cancelled) return
+
+      const activeMembers = (memberResult.data || []).filter(member => member.is_active === true && member.full_name)
+      setMembers(activeMembers)
+      const map = {}
+      ;(logResult.data || []).forEach(l => { map[l.user_id] = l })
+      setLogs(map)
+      setClients((clientResult.data || []).filter(client => client.is_active === true && client.is_archived !== true))
+      setSpendEntries(spendResult.data || [])
+      ;[memberResult, logResult, clientResult, spendResult].forEach(result => {
+        if (result.error) console.error('Accountability load failed:', result.error.message)
+      })
+      setLoading(false)
+    }
+
+    loadAccountability()
+    return () => { cancelled = true }
+  }, [canEdit, selectedWeek])
 
   async function handleChange(userId, patch) {
     setSaving(userId)
@@ -231,11 +286,37 @@ export default function Accountability() {
   const isThisWeek  = selectedWeek === thisWeekStr
   const isLastWeek  = selectedWeek === lastWeekStr
 
+  const spendStatusByMember = useMemo(() => {
+    const spendWeek = toDateStr(addWeeks(parseISODate(selectedWeek), -1))
+    const loggedClientIds = new Set(
+      spendEntries
+        .filter(entry => Number(entry.total_spend) > 0)
+        .map(entry => entry.client_id)
+    )
+    const result = {}
+
+    members.forEach(member => {
+      if (member.position !== 'creative_strategist') return
+      const assignedClientIds = clients
+        .filter(client => getClientStrategistIds(client).includes(member.id))
+        .map(client => client.id)
+      const logged = assignedClientIds.filter(clientId => loggedClientIds.has(clientId)).length
+      result[member.id] = {
+        weekStart: spendWeek,
+        logged,
+        total: assignedClientIds.length,
+        complete: assignedClientIds.length > 0 && logged === assignedClientIds.length,
+      }
+    })
+
+    return result
+  }, [clients, members, selectedWeek, spendEntries])
+
   const stats = useMemo(() => {
     const tot = members.length
     let fully = 0, missingAny = 0, totItems = 0, doneItems = 0
     members.forEach(m => {
-      const { earned, total } = scoreLog(logs[m.id], monthlyVisible)
+      const { earned, total } = scoreLog(logs[m.id], monthlyVisible, spendStatusByMember[m.id])
       totItems += total
       doneItems += earned
       if (total > 0 && earned === total) fully += 1
@@ -243,7 +324,7 @@ export default function Accountability() {
     })
     const completion = totItems > 0 ? Math.round((doneItems / totItems) * 100) : 0
     return { tot, fully, missingAny, completion }
-  }, [members, logs, monthlyVisible])
+  }, [members, logs, monthlyVisible, spendStatusByMember])
 
   if (!canEdit) {
     return (
@@ -304,19 +385,27 @@ export default function Accountability() {
               <tr>
                 <th style={{ minWidth: 200 }}>Team member</th>
                 {visibleColumns.map(c => <th key={c.key} style={{ textAlign: 'center', fontSize: 10 }}>{c.label}</th>)}
+                <th style={{ textAlign: 'center', fontSize: 10 }}>Spend Tracker</th>
                 <th style={{ textAlign: 'center' }}>Slack Participation 1–10</th>
                 <th style={{ textAlign: 'right' }}>Score</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={visibleColumns.length + 3} style={{ textAlign: 'center', padding: 32 }}>
+                <tr><td colSpan={visibleColumns.length + 4} style={{ textAlign: 'center', padding: 32 }}>
                   <div className="spinner" style={{ display: 'inline-block' }} />
                 </td></tr>
               ) : members.length === 0 ? (
-                <tr><td colSpan={visibleColumns.length + 3}><div className="empty-state"><p>No team members found.</p></div></td></tr>
+                <tr><td colSpan={visibleColumns.length + 4}><div className="empty-state"><p>No team members found.</p></div></td></tr>
               ) : members.map(m => (
-                <MemberRow key={m.id} member={m} log={logs[m.id]} onChange={handleChange} monthlyVisible={monthlyVisible} />
+                <MemberRow
+                  key={m.id}
+                  member={m}
+                  log={logs[m.id]}
+                  onChange={handleChange}
+                  monthlyVisible={monthlyVisible}
+                  spendStatus={spendStatusByMember[m.id]}
+                />
               ))}
             </tbody>
           </table>
@@ -328,6 +417,9 @@ export default function Accountability() {
           fontSize: 11, color: 'var(--text-muted)',
         }}>
           <span><b style={{ color: 'var(--text-primary)' }}>Monthly Client Report:</b> click to cycle — <span style={{ color: 'var(--text-muted)' }}>—</span> not done, <span style={{ color: 'var(--amber)' }}>½</span> partial, <span style={{ color: 'var(--green)' }}>✓</span> done</span>
+          <span>
+            <b style={{ color: 'var(--text-primary)' }}>Spend Tracker:</b> Creative Strategists receive a check when every active assigned client has prior-week spend logged.
+          </span>
           {!monthlyVisible && (
             <span style={{ color: 'var(--accent)' }}>
               Monthly Client Report and Monthly Survey columns only appear during the first week of each month.
