@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from 'recharts'
-import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Edit2, Check } from 'lucide-react'
-import { weekLabel, weekNum, parseLocal } from '../lib/dates'
+import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Edit2, Check, EyeOff, Pause, Play } from 'lucide-react'
+import { weekLabel, weekNum } from '../lib/dates'
 
 const PLATFORMS = [
   {key:'meta_spend',     totalKey:'meta_total_spend',     label:'Meta',     color:'#1877f2'},
@@ -219,7 +219,7 @@ function LogModal({ client, existing, weekStart, onClose, onSave }) {
 }
 
 // ── CLIENT ROW ───────────────────────────────────────────────
-function ClientRow({ client, entries, selectedWeek, onLog }) {
+function ClientRow({ client, entries, selectedWeek, onLog, canPause, isUpdating, onPause }) {
   const [expanded, setExpanded] = useState(false)
   const thisEntry = entries?.find(e => e.week_start === selectedWeek)
   const isLogged = !!(thisEntry?.total_spend > 0)
@@ -281,6 +281,15 @@ function ClientRow({ client, entries, selectedWeek, onLog }) {
                 style={{fontSize:11,gap:4,flexShrink:0}}
                 onClick={e=>{e.stopPropagation(); onLog(client, thisEntry||null)}}>
                 {isLogged ? <><Edit2 size={11}/> Edit</> : '+ Log'}
+              </button>
+            )}
+            {canPause && (
+              <button className="btn btn-ghost btn-sm"
+                style={{fontSize:11,gap:4,flexShrink:0,color:'var(--text-muted)'}}
+                disabled={isUpdating}
+                title={`Pause ${client.name}`}
+                onClick={e=>{e.stopPropagation(); onPause(client)}}>
+                <Pause size={11}/> {isUpdating ? 'Pausing...' : 'Pause'}
               </button>
             )}
             {locked && <span style={{fontSize:10,color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>Future</span>}
@@ -345,6 +354,70 @@ function ClientRow({ client, entries, selectedWeek, onLog }) {
   )
 }
 
+// ── PAUSED CLIENTS ──────────────────────────────────────────
+function PausedClientsPanel({ clients, entries, expanded, onToggle, canManage, updatingClientId, onUnpause }) {
+  if (!clients.length) return null
+
+  return (
+    <div style={{marginTop:20}}>
+      <button type="button" className="card"
+        aria-expanded={expanded}
+        aria-controls="paused-spend-clients"
+        onClick={onToggle}
+        style={{width:'100%',padding:'12px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',
+          gap:12,cursor:'pointer',color:'var(--text-secondary)',fontFamily:'var(--font-body)',textAlign:'left'}}>
+        <span className="flex items-center gap-2">
+          <EyeOff size={14}/>
+          <span style={{fontSize:12,fontWeight:600}}>Paused / past clients</span>
+          <span style={{padding:'2px 7px',borderRadius:100,background:'var(--bg)',border:'1px solid var(--border)',
+            fontSize:10,fontFamily:'var(--font-mono)',color:'var(--text-muted)'}}>{clients.length}</span>
+        </span>
+        <span className="flex items-center gap-2" style={{fontSize:11,color:'var(--text-muted)'}}>
+          {expanded ? 'Hide past clients' : 'Show past clients'}
+          {expanded ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
+        </span>
+      </button>
+
+      {expanded && (
+        <div id="paused-spend-clients" className="card" style={{padding:0,overflow:'hidden',marginTop:8}}>
+          <div style={{padding:'10px 16px',background:'var(--bg)',borderBottom:'1px solid var(--border)',
+            fontSize:11,color:'var(--text-muted)'}}>
+            Paused and past clients stay out of spend totals and the active tracker list. Their full spend history is preserved.
+          </div>
+          {clients.map((client,index)=>{
+            const clientEntries = entries[client.id]||[]
+            const latestEntry = clientEntries.find(entry=>entry.total_spend>0)
+            return (
+              <div key={client.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,
+                padding:'12px 16px',borderBottom:index<clients.length-1?'1px solid var(--border)':'none'}}>
+                <div style={{minWidth:0}}>
+                  <div className="flex items-center gap-2">
+                    <span style={{fontSize:13,fontWeight:600,color:'var(--text-secondary)'}}>{client.name}</span>
+                    <span style={{padding:'2px 7px',borderRadius:100,background:'var(--bg)',color:'var(--text-muted)',
+                      border:'1px solid var(--border)',fontSize:9,fontFamily:'var(--font-mono)'}}>Paused</span>
+                  </div>
+                  <div style={{fontSize:10,color:'var(--text-muted)',fontFamily:'var(--font-mono)',marginTop:3}}>
+                    {latestEntry
+                      ? `Last logged W${weekNum(latestEntry.week_start)} · DDU ${fmtMoney(latestEntry.ddu_spend)} / Total ${fmtMoney(latestEntry.total_spend)} · ${clientEntries.length} entr${clientEntries.length===1?'y':'ies'} saved`
+                      : 'No spend history logged'}
+                  </div>
+                </div>
+                {canManage && (
+                  <button type="button" className="btn btn-ghost btn-sm"
+                    disabled={updatingClientId===client.id}
+                    onClick={()=>onUnpause(client)}>
+                    <Play size={11}/> {updatingClientId===client.id ? 'Unpausing...' : 'Unpause'}
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── MAIN PAGE ─────────────────────────────────────────────────
 export default function SpendTracker() {
   const { profile, isManagement, isOps } = useAuth()
@@ -357,9 +430,10 @@ export default function SpendTracker() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [csFilter, setCsFilter] = useState('all')
   const [search, setSearch]     = useState('')
+  const [showPaused, setShowPaused] = useState(false)
+  const [updatingClientId, setUpdatingClientId] = useState(null)
 
   const [viewMode, setViewMode] = useState('weekly') // 'weekly' | 'monthly'
-  const [showArchived, setShowArchived] = useState(false)
   // Default to last Monday — the standard logging day
   const [selectedWeek, setSelectedWeek] = useState(() => toDateStr(getLastMonday()))
   const [selectedMonth, setSelectedMonth] = useState(() => getMonthStart(new Date()))
@@ -370,11 +444,12 @@ export default function SpendTracker() {
     if (!profile?.id) return
     setLoading(true)
     const [{ data:clientData }, { data:memberData }] = await Promise.all([
-      supabase.from('clients').select('*').eq('is_active', true).order('name'),
+      // Include legacy inactive clients so they can be viewed and restored from the paused drawer.
+      supabase.from('clients').select('*').order('name'),
       supabase.from('profiles').select('id,full_name,position').order('full_name'),
     ])
     const allClients = clientData||[]
-    setClients(allClients) // keep all for archived tab
+    setClients(allClients)
     setMembers(memberData||[])
     if (clientData?.length) {
       const { data:entryData } = await supabase.from('spend_entries').select('*')
@@ -385,6 +460,34 @@ export default function SpendTracker() {
       setEntries(map)
     }
     setLoading(false)
+  }
+
+  async function setClientPaused(client, isPaused) {
+    if (!isManagement && !isOps) return
+    if (isPaused && !confirm(`Pause "${client.name}"? It will be hidden from the active spend tracker, but its history will remain available below.`)) return
+
+    setUpdatingClientId(client.id)
+    const patch = isPaused
+      ? {is_archived:true}
+      : {is_active:true,is_archived:false}
+    const { data, error } = await supabase.from('clients')
+      .update(patch)
+      .eq('id',client.id)
+      .select('id,is_active,is_archived')
+
+    if (error) {
+      alert(`${isPaused ? 'Pause' : 'Unpause'} failed: ${error.message}`)
+      setUpdatingClientId(null)
+      return
+    }
+    if (!data?.length) {
+      alert(`${isPaused ? 'Pause' : 'Unpause'} did not apply — your account may not have permission to edit clients.`)
+      setUpdatingClientId(null)
+      return
+    }
+
+    setClients(prev=>prev.map(c=>c.id===client.id?{...c,...patch}:c))
+    setUpdatingClientId(null)
   }
 
   // Week navigation
@@ -403,22 +506,21 @@ export default function SpendTracker() {
   const isLastWeek = selectedWeek === toDateStr(getLastMonday())
   const isThisWeek = isCurrentWeek(selectedWeek)
 
-  const activeClients = clients.filter(c => !c.is_archived)
-  const archivedClients = clients.filter(c => c.is_archived)
-  const csMap = Object.fromEntries(members.map(m=>[m.id,m]))
+  const activeClients = clients.filter(c => c.is_active!==false && !c.is_archived)
+  const pausedClients = clients.filter(c => c.is_active===false || c.is_archived)
   const csMembers = members.filter(m => m.position==='creative_strategist')
 
   // Monthly stats — sum all entries whose week_start falls in selectedMonth
   const monthStart = toDateStr(getMonthStart(selectedMonth))
   const monthEnd   = toDateStr(getMonthEnd(selectedMonth))
-  const monthEntries = (showArchived ? clients : activeClients).flatMap(cl =>
+  const monthEntries = activeClients.flatMap(cl =>
     (entries[cl.id]||[]).filter(e => e.week_start >= monthStart && e.week_start <= monthEnd && e.total_spend > 0)
       .map(e => ({...e, clientName: cl.name}))
   )
   const monthDDU   = monthEntries.reduce((s,e)=>s+(e.ddu_spend||0),0)
   const monthTotal = monthEntries.reduce((s,e)=>s+(e.total_spend||0),0)
   const monthAvgPct = monthTotal>0 ? ((monthDDU/monthTotal)*100).toFixed(1) : null
-  const monthAtRisk = (showArchived ? clients : activeClients).filter(cl=>{
+  const monthAtRisk = activeClients.filter(cl=>{
     const clEntries=(entries[cl.id]||[]).filter(e=>e.week_start>=monthStart&&e.week_start<=monthEnd&&e.total_spend>0)
     if (!clEntries.length) return false
     const tot=clEntries.reduce((s,e)=>s+e.total_spend,0)
@@ -427,7 +529,7 @@ export default function SpendTracker() {
   }).length
 
   // Stats for selected week
-  const weekEntries = (showArchived ? clients : activeClients).map(c => entries[c.id]?.find(e=>e.week_start===selectedWeek)).filter(e=>e?.total_spend>0)
+  const weekEntries = activeClients.map(c => entries[c.id]?.find(e=>e.week_start===selectedWeek)).filter(e=>e?.total_spend>0)
   const totalDDU   = weekEntries.reduce((s,e) => s+(e.ddu_spend||0), 0)
   const totalAll   = weekEntries.reduce((s,e) => s+(e.total_spend||0), 0)
   const avgPct     = weekEntries.length ? (weekEntries.reduce((s,e) => s+(e.ddu_spend/e.total_spend)*100, 0)/weekEntries.length).toFixed(1) : null
@@ -436,8 +538,8 @@ export default function SpendTracker() {
   const spendStatus = avgPct !== null ? getStatus(parseFloat(avgPct)) : null
 
   // Filter + sort
-  const displayClients = showArchived ? archivedClients : activeClients
-  const filtered = displayClients.filter(c => {
+  const displayClients = activeClients
+  const filtered = activeClients.filter(c => {
     if (search && !c.name.toLowerCase().includes(search.toLowerCase())) return false
     // CS filter
     if (csFilter !== 'all') {
@@ -462,6 +564,14 @@ export default function SpendTracker() {
     if (pa!==null && pb!==null) return pa - pb
     return a.name.localeCompare(b.name)
   })
+  const monthlyClients = activeClients.filter(c => {
+    if (search && !c.name.toLowerCase().includes(search.toLowerCase())) return false
+    if (csFilter !== 'all') {
+      const ids = Array.isArray(c.cs_ids) ? c.cs_ids : (c.cs_ids ? (() => { try { return JSON.parse(c.cs_ids) } catch { return [] } })() : [])
+      if (!ids.includes(csFilter)) return false
+    }
+    return true
+  })
 
   return (
     <>
@@ -473,13 +583,6 @@ export default function SpendTracker() {
           </div>
 
           <div className="flex gap-2 items-center">
-            {/* Archived toggle */}
-            <button onClick={()=>setShowArchived(!showArchived)}
-              className={showArchived?'btn btn-ghost btn-sm':'btn btn-ghost btn-sm'}
-              style={{color:showArchived?'var(--amber)':'var(--text-secondary)',borderColor:showArchived?'var(--amber)':'var(--border)'}}>
-              {showArchived?'← Active Clients':'Archived'}
-            </button>
-
             {/* View toggle */}
             <div style={{display:'flex',border:'1.5px solid var(--border)',borderRadius:'var(--radius)',overflow:'hidden'}}>
               <button onClick={()=>setViewMode('weekly')}
@@ -609,7 +712,10 @@ export default function SpendTracker() {
                 <ClientRow key={client.id} client={client}
                   entries={entries[client.id]||[]}
                   selectedWeek={selectedWeek}
-                  onLog={(c,e)=>{ setLogClient(c); setLogExisting(e||null) }}/>
+                  onLog={(c,e)=>{ setLogClient(c); setLogExisting(e||null) }}
+                  canPause={isManagement||isOps}
+                  isUpdating={updatingClientId===client.id}
+                  onPause={c=>setClientPaused(c,true)}/>
               ))}
               {filtered.length===0 && <div className="empty-state"><p>No clients match this filter.</p></div>}
             </div>
@@ -629,7 +735,7 @@ export default function SpendTracker() {
                     </tr>
                   </thead>
                   <tbody>
-                    {clients.map(client=>{
+                    {monthlyClients.map(client=>{
                       const clientMonthEntries=(entries[client.id]||[]).filter(e=>e.week_start>=monthStart&&e.week_start<=monthEnd&&e.total_spend>0)
                       const mDDU=clientMonthEntries.reduce((s,e)=>s+(e.ddu_spend||0),0)
                       const mTotal=clientMonthEntries.reduce((s,e)=>s+(e.total_spend||0),0)
@@ -681,6 +787,18 @@ export default function SpendTracker() {
             </div>
           )
         }
+
+        {!loading && (
+          <PausedClientsPanel
+            clients={pausedClients}
+            entries={entries}
+            expanded={showPaused}
+            onToggle={()=>setShowPaused(value=>!value)}
+            canManage={isManagement||isOps}
+            updatingClientId={updatingClientId}
+            onUnpause={client=>setClientPaused(client,false)}
+          />
+        )}
       </div>
 
       {logClient && (

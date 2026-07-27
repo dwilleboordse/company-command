@@ -39,7 +39,7 @@ function currentQuarter() {
 }
 
 export default function Dashboard() {
-  const { profile, isCEO, isManagement } = useAuth()
+  const { profile, isManagement } = useAuth()
   const [objectives, setObjectives] = useState([])
   const [keyResults, setKeyResults] = useState([])
   const [krValues, setKrValues] = useState([])
@@ -101,31 +101,31 @@ export default function Dashboard() {
       try {
         const {data:wo}=await supabase.from('week_outcomes').select('*').eq('user_id',profile.id).eq('week_start',lastMondayStr).single()
         setWeekOutcome(wo)
-      } catch(e) { setWeekOutcome(null) }
+      } catch { setWeekOutcome(null) }
 
       // 100-day plan
       try {
         const {data:planRow}=await supabase.from('hundred_day_plans').select('*').eq('user_id',profile.id).maybeSingle()
         setPlan(planRow || null)
-      } catch(e) { setPlan(null) }
+      } catch { setPlan(null) }
 
       // Day entries
       try {
         const {data:days}=await supabase.from('day_entries').select('*').eq('user_id',profile.id)
           .gte('entry_date',weekStartStr).lte('entry_date',todayStr)
         const map={}; days?.forEach(d=>{map[d.entry_date]=d}); setDayEntries(map)
-      } catch(e) { setDayEntries({}) }
+      } catch { setDayEntries({}) }
 
       // Spend
       try {
-        let clientQ = supabase.from('clients').select('id,name,cs_ids,mb_ids,editor_ids,designer_ids,ugc_ids,assigned_cs_id')
+        let clientQ = supabase.from('clients').select('id,name,cs_ids,mb_ids,editor_ids,designer_ids,ugc_ids,assigned_cs_id,is_archived')
           .eq('is_active',true).order('name')
         if (!isManagement && profile?.id) {
           clientQ = clientQ.contains('cs_ids', [profile.id])
         }
         const {data:allClients}=await clientQ
         // Server already filtered by assignment — just use what came back
-      const relevantClients = allClients||[]
+      const relevantClients = (allClients||[]).filter(client=>!client.is_archived)
         setMyClients(relevantClients)
 
         if (relevantClients.length) {
