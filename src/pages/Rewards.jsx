@@ -180,7 +180,7 @@ function AccountabilityLeaderboard() {
     setLoading(true)
     const [{ data: logData }, { data: memberData }] = await Promise.all([
       supabase.from('accountability_logs').select('*').order('week_start', { ascending: false }).limit(2000),
-      supabase.from('profiles').select('id,full_name,position,role,avatar_url').order('full_name'),
+      supabase.from('profiles').select('id,full_name,position,role,avatar_url').eq('is_active', true).order('full_name'),
     ])
     setLogs(logData || [])
     setMembers((memberData || []).filter(m => m.full_name))

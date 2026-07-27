@@ -49,6 +49,7 @@ export default async function handler(req, res) {
       role: role || 'athlete',
       position: position || null,
       department: department || null,
+      is_active: true,
     }),
   })
 

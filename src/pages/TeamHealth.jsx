@@ -235,7 +235,7 @@ export default function TeamHealth() {
 
   async function load() {
     setLoading(true)
-    const {data:memberData}=await supabase.from('profiles').select('*').eq('role','athlete').order('full_name')
+    const {data:memberData}=await supabase.from('profiles').select('*').eq('is_active',true).eq('role','athlete').order('full_name')
     setMembers(memberData||[])
     if (memberData?.length) {
       const {data:reviewData}=await supabase.from('team_reviews').select('*').in('reviewee_id',memberData.map(m=>m.id)).order('week_start',{ascending:false})

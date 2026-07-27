@@ -179,7 +179,7 @@ export default function Meetings() {
   useEffect(() => { if (members.length) loadPrepStats() }, [members, selectedType, date])
 
   async function loadTeam() {
-    const { data } = await supabase.from('profiles').select('*').order('full_name')
+    const { data } = await supabase.from('profiles').select('*').eq('is_active', true).order('full_name')
     setMembers(data || [])
   }
 

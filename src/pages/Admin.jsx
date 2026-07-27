@@ -170,7 +170,7 @@ export default function Admin() {
 
   async function loadTeam() {
     setLoading(true)
-    const { data } = await supabase.from('profiles').select('*').order('department').order('full_name')
+    const { data } = await supabase.from('profiles').select('*').eq('is_active', true).order('department').order('full_name')
     setMembers(data || [])
     setLoading(false)
   }

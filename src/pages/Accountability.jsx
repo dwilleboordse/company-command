@@ -191,7 +191,7 @@ export default function Accountability() {
   async function load() {
     setLoading(true)
     const [{ data: memberData }, { data: logData }] = await Promise.all([
-      supabase.from('profiles').select('id,full_name,position,role').order('full_name'),
+      supabase.from('profiles').select('id,full_name,position,role').eq('is_active', true).order('full_name'),
       supabase.from('accountability_logs').select('*').eq('week_start', selectedWeek),
     ])
     setMembers((memberData || []).filter(m => m.full_name))

@@ -112,7 +112,7 @@ export default function Analytics() {
       supabase.from('spend_entries').select('*').gte('week_start',earliestWeek),
       supabase.from('client_health_entries').select('*').gte('week_start',earliestWeek),
       supabase.from('team_reviews').select('*').gte('week_start',earliestWeek),
-      supabase.from('profiles').select('id,full_name,role,position').order('full_name'),
+      supabase.from('profiles').select('id,full_name,role,position').eq('is_active', true).order('full_name'),
       supabase.from('change_log').select('*').gte('week_start',earliestWeek),
       supabase.from('onboarding_checklists').select('*'),
       supabase.from('objectives').select('*').eq('is_active',true),

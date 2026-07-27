@@ -511,7 +511,7 @@ export default function ClientRoster() {
     setLoading(true)
     const [{data:clientData},{data:memberData}] = await Promise.all([
       supabase.from('clients').select('*').eq('is_active',true).order('name'),
-      supabase.from('profiles').select('id,full_name,position,avatar_url').order('full_name'),
+      supabase.from('profiles').select('id,full_name,position,avatar_url').eq('is_active', true).order('full_name'),
     ])
     setClients(clientData||[])
     setAllMembers(memberData||[])

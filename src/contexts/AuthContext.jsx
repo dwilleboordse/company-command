@@ -31,9 +31,16 @@ export function AuthProvider({ children }) {
       .eq('id', userId)
       .single()
 
+    if (data?.is_active === false) {
+      setProfile(null)
+      setLoading(false)
+      await supabase.auth.signOut()
+      return
+    }
+
     if (data) {
       setProfile(data)
-    } else {
+    } else if (error?.code === 'PGRST116') {
       // No profile yet — create a minimal one on first login
       const name = email ? email.split('@')[0] : 'User'
       const { data: newProfile } = await supabase
@@ -43,10 +50,13 @@ export function AuthProvider({ children }) {
           email: email || '',
           full_name: name,
           role: 'athlete',
+          is_active: true,
         }, { onConflict: 'id' })
         .select()
         .single()
       setProfile(newProfile)
+    } else {
+      setProfile(null)
     }
     setLoading(false)
   }

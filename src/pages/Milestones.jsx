@@ -131,7 +131,7 @@ export default function Milestones() {
   useEffect(()=>{if(isManagement)loadMembers()},[isManagement])
 
   async function loadMembers() {
-    const {data}=await supabase.from('profiles').select('id,full_name,position').order('full_name')
+    const {data}=await supabase.from('profiles').select('id,full_name,position').eq('is_active',true).order('full_name')
     setMembers(data||[])
   }
 

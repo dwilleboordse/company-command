@@ -403,7 +403,7 @@ export default function KPIs() {
     setKpis(kpiData || [])
 
     // Load team members
-    let memberQ = supabase.from('profiles').select('id,full_name,position,role').order('full_name')
+    let memberQ = supabase.from('profiles').select('id,full_name,position,role').eq('is_active', true).order('full_name')
     if (!isManagement) memberQ = memberQ.eq('id', profile.id)
     const { data: memberData } = await memberQ
     setMembers(memberData || [])

@@ -580,7 +580,7 @@ export default function HundredDayPlan() {
         setLoading(true)
         const [{ data: planRows }, { data: memberRows }] = await Promise.all([
           supabase.from('hundred_day_plans').select('*').order('updated_at', { ascending: false }),
-          supabase.from('profiles').select('id, full_name, position, role, avatar_url'),
+          supabase.from('profiles').select('id, full_name, position, role, avatar_url').eq('is_active', true),
         ])
         const memberMap = {}
         ;(memberRows || []).forEach(m => { memberMap[m.id] = m })

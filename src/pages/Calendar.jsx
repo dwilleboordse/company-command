@@ -195,7 +195,7 @@ export default function Calendar() {
   }, [isManagement, profile])
 
   async function loadTeam() {
-    const { data } = await supabase.from('profiles').select('id,full_name,role,position').order('full_name')
+    const { data } = await supabase.from('profiles').select('id,full_name,role,position').eq('is_active', true).order('full_name')
     setMembers(data || [])
   }
 

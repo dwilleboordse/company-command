@@ -11,9 +11,12 @@ create table if not exists profiles (
   role text not null default 'athlete' check (role in ('ceo', 'management', 'athlete')),
   department text,
   position text,
+  is_active boolean not null default true,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
+
+alter table profiles add column if not exists is_active boolean not null default true;
 
 -- KPI DEFINITIONS
 create table if not exists kpis (

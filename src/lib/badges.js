@@ -356,7 +356,7 @@ export async function computeAndAwardBadges(userId, position) {
 // ── LEADERBOARD COMPUTATION ───────────────────────────────────
 export async function getLeaderboard() {
   const [{ data: profiles }, { data: badges }, { data: points }] = await Promise.all([
-    supabase.from('profiles').select('id,full_name,position,avatar_url').neq('role', 'ceo'),
+    supabase.from('profiles').select('id,full_name,position,avatar_url').eq('is_active', true).neq('role', 'ceo'),
     supabase.from('user_badges').select('user_id, badge_id'),
     supabase.from('user_points').select('user_id, points'),
   ])

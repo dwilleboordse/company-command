@@ -446,7 +446,7 @@ export default function SpendTracker() {
     const [{ data:clientData }, { data:memberData }] = await Promise.all([
       // Include legacy inactive clients so they can be viewed and restored from the paused drawer.
       supabase.from('clients').select('*').order('name'),
-      supabase.from('profiles').select('id,full_name,position').order('full_name'),
+      supabase.from('profiles').select('id,full_name,position').eq('is_active', true).order('full_name'),
     ])
     const allClients = clientData||[]
     setClients(allClients)

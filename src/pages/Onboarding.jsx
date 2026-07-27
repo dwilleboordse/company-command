@@ -318,7 +318,7 @@ export default function Onboarding() {
     setLoading(true)
     const [{data:clientData},{data:memberData}] = await Promise.all([
       supabase.from('clients').select('*').eq('is_active',true).order('name'),
-      supabase.from('profiles').select('id,full_name,position').order('full_name'),
+      supabase.from('profiles').select('id,full_name,position').eq('is_active', true).order('full_name'),
     ])
     // Filter archived; athletes see all active clients (they need to action their items)
     const active = (clientData||[]).filter(c=>!c.is_archived)

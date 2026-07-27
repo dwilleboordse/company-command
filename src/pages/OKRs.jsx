@@ -595,7 +595,7 @@ export default function OKRs() {
 
   async function load() {
     if (!profile) return; setLoading(true)
-    const {data:memberData}=await supabase.from('profiles').select('id,full_name,position,avatar_url,role').order('full_name')
+    const {data:memberData}=await supabase.from('profiles').select('id,full_name,position,avatar_url,role').eq('is_active',true).order('full_name')
     setAllMembers(memberData||[])
 
     let objQ=supabase.from('objectives').select('*').eq('is_active',true).order('created_at')
