@@ -24,6 +24,17 @@ const COLUMNS = [
 const isMonthlyType = (t) => t === 'monthly-bool' || t === 'monthly-tri'
 
 const SLACK_KEY = 'slack_participation'
+const alphabeticalCollator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true })
+
+function memberRoleLabel(member) {
+  return (member.position || member.role || 'Unassigned').replace(/_/g, ' ')
+}
+
+function compareMembersByRoleThenName(a, b) {
+  const roleOrder = alphabeticalCollator.compare(memberRoleLabel(a), memberRoleLabel(b))
+  if (roleOrder !== 0) return roleOrder
+  return alphabeticalCollator.compare(a.full_name || '', b.full_name || '')
+}
 
 // ── DATE HELPERS (Monday-anchored, timezone safe) ────────
 function toDateStr(d) {
@@ -102,7 +113,7 @@ function MemberRow({ member, log, onChange, monthlyVisible, spendStatus }) {
           <div>
             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{member.full_name}</div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'capitalize' }}>
-              {(member.position || member.role || '').replace(/_/g, ' ')}
+              {memberRoleLabel(member)}
             </div>
           </div>
         </div>
@@ -239,7 +250,9 @@ export default function Accountability() {
       ])
       if (cancelled) return
 
-      const activeMembers = (memberResult.data || []).filter(member => member.is_active === true && member.full_name)
+      const activeMembers = (memberResult.data || [])
+        .filter(member => member.is_active === true && member.full_name)
+        .sort(compareMembersByRoleThenName)
       setMembers(activeMembers)
       const map = {}
       ;(logResult.data || []).forEach(l => { map[l.user_id] = l })
