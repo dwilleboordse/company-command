@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useTheme } from '../contexts/ThemeContext'
-import { LayoutDashboard, Target, Calendar, Video, LogOut, Settings, TrendingUp, Users, DollarSign, Menu, X, FileText, Trophy, Heart, UserCheck, Sun, Moon, ClipboardCheck, BarChart3, Compass, ShieldCheck } from 'lucide-react'
+import { LayoutDashboard, Target, Calendar, Video, LogOut, Settings, TrendingUp, TrendingDown, Users, DollarSign, Menu, X, FileText, Trophy, Heart, UserCheck, Sun, Moon, ClipboardCheck, BarChart3, Compass, ShieldCheck } from 'lucide-react'
 
 export default function Layout() {
   const { profile, signOut, isCEO, isManagement, isOps } = useAuth()
@@ -63,6 +63,7 @@ export default function Layout() {
             <>
               <p className="nav-section-label">Insights</p>
               <NavLink to="/analytics" className={nl}><BarChart3 size={16}/> Analytics</NavLink>
+              <NavLink to="/churn-analysis" className={nl}><TrendingDown size={16}/> Churn Analysis</NavLink>
             </>
           )}
 

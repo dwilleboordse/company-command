@@ -18,6 +18,7 @@ import Rewards from './pages/Rewards'
 import Analytics from './pages/Analytics'
 import HundredDayPlan from './pages/HundredDayPlan'
 import Accountability from './pages/Accountability'
+import ChurnAnalysis from './pages/ChurnAnalysis'
 
 function PR({ children, ceo=false, mgmt=false, ops=false }) {
   const { user, profile, loading, isOps } = useAuth()
@@ -47,6 +48,7 @@ function AppRoutes() {
         <Route path="clients" element={<PR mgmt ops><Clients/></PR>}/>
         <Route path="team-health" element={<PR mgmt ops><TeamHealth/></PR>}/>
         <Route path="analytics" element={<PR mgmt><Analytics/></PR>}/>
+        <Route path="churn-analysis" element={<PR mgmt><ChurnAnalysis/></PR>}/>
         <Route path="client-roster" element={<PR mgmt ops><ClientRoster/></PR>}/>
         <Route path="onboarding" element={<PR><Onboarding/></PR>}/>
         <Route path="ceo" element={<PR ceo><CEOModels/></PR>}/>
