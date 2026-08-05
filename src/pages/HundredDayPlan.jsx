@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
+import { getMondayStr, today as todayStr } from '../lib/dates'
 import {
   Target, ListChecks, Route, ShieldAlert, CheckCircle2,
   ChevronLeft, ChevronRight, Plus, X, Download,
@@ -271,6 +272,19 @@ const CSS = `
 .hdp-team-meta b{color:var(--parchment);font-weight:500}
 .hdp-team-row-body{padding:0 20px 20px;border-top:1px solid var(--line)}
 
+.hdp-pulse{border:1px solid var(--line);border-radius:13px;background:var(--panel2);padding:18px;margin:24px 0}
+.hdp-pulse-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.hdp-pulse-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.hdp-pulse-history{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:14px}
+.hdp-pulse-history-item{border:1px solid var(--line);border-radius:9px;padding:12px;background:var(--ink)}
+.hdp-pulse-history-item .week{font-family:var(--mono);font-size:10px;color:var(--faint);margin-bottom:5px}
+.hdp-pulse-history-item .note{font-size:12.5px;color:#d4cbb9;line-height:1.5}
+.hdp-pulse-tag{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+  padding:3px 8px;border-radius:999px;font-weight:600;white-space:nowrap}
+.hdp-pulse-tag.on_track{color:var(--teal);border:1px solid rgba(95,179,166,.35);background:rgba(95,179,166,.1)}
+.hdp-pulse-tag.at_risk{color:var(--gold-2);border:1px solid rgba(224,163,64,.4);background:rgba(224,163,64,.1)}
+.hdp-pulse-tag.off_track,.hdp-pulse-tag.due{color:var(--danger);border:1px solid rgba(217,104,74,.4);background:rgba(217,104,74,.1)}
+
 .hdp-mobile-prog{display:none}
 
 @media (max-width:880px){
@@ -281,6 +295,7 @@ const CSS = `
   .hdp-row.two{grid-template-columns:1fr}
   .hdp-kr{grid-template-columns:1fr 1fr;gap:8px}
   .hdp-kr .full{grid-column:1 / -1}
+  .hdp-pulse-grid,.hdp-pulse-history{grid-template-columns:1fr}
   .hdp-arrow{display:none}
   .hdp-foot{position:sticky;bottom:0;background:var(--ink);
     margin:32px -20px 0;padding:16px 20px;border-top:1px solid var(--line2)}
@@ -327,6 +342,145 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 const fmt = (d) => d ? new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "—";
 const fmtY = (d) => d ? new Date(d).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—";
+const normalizeCheckpoints = (value = {}) => ({
+  ...value,
+  d30: value.d30 || value.d25 || '',
+  d60: value.d60 || value.d50 || '',
+  d90: value.d90 || value.d75 || '',
+})
+const pulseLabel = (status) => status === 'off_track' ? 'Off track' : status === 'at_risk' ? 'At risk' : 'On track'
+
+function WeeklyPulse({ planId, userId }) {
+  const weekStart = getMondayStr(new Date())
+  const emptyPulse = useMemo(() => ({
+    milestone: '', metric_now: '', track_status: 'on_track', progress_note: '', blocker: '', next_commitment: '',
+  }), [])
+  const [pulse, setPulse] = useState(emptyPulse)
+  const [history, setHistory] = useState([])
+  const [state, setState] = useState('idle')
+  const [message, setMessage] = useState('')
+
+  const loadPulses = useCallback(async () => {
+    if (!planId) return
+    const { data, error } = await supabase
+      .from('hundred_day_plan_weekly_pulses')
+      .select('*')
+      .eq('plan_id', planId)
+      .order('week_start', { ascending: false })
+      .limit(6)
+    if (error) {
+      setMessage(error.message)
+      return
+    }
+    const rows = data || []
+    setHistory(rows)
+    const current = rows.find(row => row.week_start === weekStart)
+    setPulse(current ? { ...emptyPulse, ...current } : emptyPulse)
+  }, [emptyPulse, planId, weekStart])
+
+  useEffect(() => {
+    if (!planId) return
+    let cancelled = false
+    supabase
+      .from('hundred_day_plan_weekly_pulses')
+      .select('*')
+      .eq('plan_id', planId)
+      .order('week_start', { ascending: false })
+      .limit(6)
+      .then(({ data, error }) => {
+        if (cancelled) return
+        if (error) {
+          setMessage(error.message)
+          return
+        }
+        const rows = data || []
+        setHistory(rows)
+        const current = rows.find(row => row.week_start === weekStart)
+        setPulse(current ? { ...emptyPulse, ...current } : emptyPulse)
+      })
+    return () => { cancelled = true }
+  }, [emptyPulse, planId, weekStart])
+
+  const savePulse = async () => {
+    if (!planId || !userId) return
+    if (!pulse.progress_note.trim() && !pulse.next_commitment.trim()) {
+      setMessage('Add a progress note or next commitment before saving.')
+      return
+    }
+    setState('saving'); setMessage('')
+    const { error } = await supabase.from('hundred_day_plan_weekly_pulses').upsert({
+      plan_id: planId,
+      user_id: userId,
+      week_start: weekStart,
+      milestone: pulse.milestone.trim(),
+      metric_now: pulse.metric_now.trim(),
+      track_status: pulse.track_status,
+      progress_note: pulse.progress_note.trim(),
+      blocker: pulse.blocker.trim(),
+      next_commitment: pulse.next_commitment.trim(),
+      submitted_at: new Date().toISOString(),
+    }, { onConflict: 'plan_id,week_start' })
+    if (error) {
+      setState('error'); setMessage(error.message)
+      return
+    }
+    setState('saved'); setMessage('Weekly pulse saved.')
+    await loadPulses()
+  }
+
+  if (!planId) return null
+
+  return (
+    <div className="hdp-pulse">
+      <div className="hdp-eyebrow">Weekly execution pulse · week of {fmtY(weekStart)}<span className="bar" /></div>
+      <p className="hdp-sub" style={{ marginBottom: 18 }}>A short, evidence-based update for your lead. Update it once each week.</p>
+      <div className="hdp-pulse-grid">
+        <div className="hdp-field">
+          <label>Milestone in focus</label>
+          <input className="hdp-input" value={pulse.milestone} placeholder="The milestone you are moving this week" onChange={e => setPulse({ ...pulse, milestone: e.target.value })} />
+        </div>
+        <div className="hdp-field">
+          <label>Metric now</label>
+          <input className="hdp-input" value={pulse.metric_now} placeholder="Current result or leading indicator" onChange={e => setPulse({ ...pulse, metric_now: e.target.value })} />
+        </div>
+        <div className="hdp-field">
+          <label>Execution status</label>
+          <select className="hdp-select" value={pulse.track_status} onChange={e => setPulse({ ...pulse, track_status: e.target.value })}>
+            <option value="on_track">On track</option>
+            <option value="at_risk">At risk</option>
+            <option value="off_track">Off track</option>
+          </select>
+        </div>
+        <div className="hdp-field">
+          <label>Blocker or ask</label>
+          <input className="hdp-input" value={pulse.blocker} placeholder="What needs escalation or help?" onChange={e => setPulse({ ...pulse, blocker: e.target.value })} />
+        </div>
+      </div>
+      <div className="hdp-field" style={{ marginBottom: 14 }}>
+        <label>Progress since last week</label>
+        <textarea className="hdp-area" value={pulse.progress_note} placeholder="What changed, shipped, or was learned?" onChange={e => setPulse({ ...pulse, progress_note: e.target.value })} />
+      </div>
+      <div className="hdp-field" style={{ marginBottom: 14 }}>
+        <label>Next commitment</label>
+        <input className="hdp-input" value={pulse.next_commitment} placeholder="The concrete outcome you will deliver next" onChange={e => setPulse({ ...pulse, next_commitment: e.target.value })} />
+      </div>
+      <div className="hdp-pulse-actions">
+        <span className="hdp-save-status" style={state === 'error' ? { color: 'var(--danger)' } : undefined}>{message}</span>
+        <button className="hdp-btn primary" disabled={state === 'saving'} onClick={savePulse}><Save size={14} /> {state === 'saving' ? 'Saving…' : 'Save weekly pulse'}</button>
+      </div>
+      {history.length > 0 && (
+        <div className="hdp-pulse-history">
+          {history.slice(0, 4).map(item => (
+            <div className="hdp-pulse-history-item" key={item.id}>
+              <div className="week">Week of {fmtY(item.week_start)} · {pulseLabel(item.track_status)}</div>
+              <div className="note">{item.progress_note || item.next_commitment || 'No note added.'}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function HundredDayPlan() {
   const { profile, isManagement, isOps } = useAuth()
@@ -337,13 +491,14 @@ export default function HundredDayPlan() {
   const [saveStatus, setSaveStatus] = useState({ state: 'idle', at: null }); // 'idle' | 'saving' | 'saved' | 'error'
   const [viewMode, setViewMode] = useState('wizard');         // 'wizard' | 'summary'
   const [committedAt, setCommittedAt] = useState(null);       // ISO timestamp when last committed
+  const [planId, setPlanId] = useState(null)
   const planStatusRef = useRef('draft');                      // current persisted status ('draft' | 'committed')
   const [tab, setTab] = useState('mine');                     // 'mine' | 'team' — only relevant for mgmt/ops
 
   const [member, setMember] = useState({ name: "", role: "", department: "", startDate: "" });
   const [anchors, setAnchors] = useState([]);
   const [objectives, setObjectives] = useState([]);
-  const [cps, setCps] = useState({ d25: "", d50: "", d75: "" });
+  const [cps, setCps] = useState({ d30: "", d60: "", d90: "" });
   const [risk, setRisk] = useState({ blocker: "", need: "", deps: "" });
   const [confidence, setConfidence] = useState(6);
 
@@ -353,8 +508,8 @@ export default function HundredDayPlan() {
     if (!member.startDate) return null;
     const s = member.startDate;
     return {
-      start: s, d25: addDays(s, 24), d50: addDays(s, 49),
-      d75: addDays(s, 74), d100: addDays(s, 99),
+      start: s, d30: addDays(s, 29), d60: addDays(s, 59),
+      d90: addDays(s, 89), d100: addDays(s, 99),
     };
   }, [member.startDate]);
 
@@ -419,6 +574,7 @@ export default function HundredDayPlan() {
       const defaultDept = POSITION_LABELS[profile.position] || ''
 
       if (planData) {
+        setPlanId(planData.id)
         setMember({
           name:       planData.name       || profile.full_name || '',
           role:       planData.role       || (POSITION_LABELS[profile.position] || ''),
@@ -427,7 +583,7 @@ export default function HundredDayPlan() {
         })
         setAnchors(planData.anchored_objective_ids || [])
         setObjectives(planData.objectives || [])
-        setCps(planData.checkpoints || { d25: '', d50: '', d75: '' })
+        setCps(normalizeCheckpoints(planData.checkpoints))
         setRisk(planData.risks || { blocker: '', need: '', deps: '' })
         setConfidence(planData.confidence ?? 6)
         planStatusRef.current = planData.status || 'draft'
@@ -447,7 +603,7 @@ export default function HundredDayPlan() {
     })()
 
     return () => { cancel = true }
-  }, [profile?.id])
+  }, [profile?.id, profile?.full_name, profile?.position])
 
   // ── SAVE ─────────────────────────────────────────────────
   // Status defaults to whatever the plan currently is (tracked in planStatusRef).
@@ -471,13 +627,16 @@ export default function HundredDayPlan() {
       confidence,
       status,
     }
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('hundred_day_plans')
       .upsert(payload, { onConflict: 'user_id' })
+      .select('id')
+      .single()
     if (error) {
       console.error('Save plan failed:', error)
       setSaveStatus({ state: 'error', message: error.message || 'unknown error' })
     } else {
+      setPlanId(data.id)
       setSaveStatus({ state: 'saved', at: Date.now() })
     }
   }, [profile?.id, member, dates, anchors, objectives, cps, risk, confidence])
@@ -514,7 +673,7 @@ export default function HundredDayPlan() {
   const toggleAnchor = (id) => setAnchors(anchors.includes(id) ? anchors.filter(a => a !== id) : [...anchors, id]);
 
   const canContinue = () => {
-    if (step === 0) return member.name.trim() && member.department && member.startDate;
+    if (step === 0) return member.name.trim() && member.department && member.startDate >= '2020-01-01' && member.startDate <= addDays(todayStr(), 365).toISOString().slice(0, 10);
     if (step === 1) return anchors.length > 0;
     if (step === 2) return objectives.length > 0 && objectives.every(o => o.statement.trim());
     if (step === 3) return objectives.every(o => o.keyResults.some(k => k.metric.trim()));
@@ -526,9 +685,9 @@ export default function HundredDayPlan() {
   const Track = () => {
     const ticks = [
       { p: 0, d: "D1", date: dates && fmt(dates.start) },
-      { p: 25, d: "25", date: dates && fmt(dates.d25) },
-      { p: 50, d: "50", date: dates && fmt(dates.d50) },
-      { p: 75, d: "75", date: dates && fmt(dates.d75) },
+      { p: 30, d: "30", date: dates && fmt(dates.d30) },
+      { p: 60, d: "60", date: dates && fmt(dates.d60) },
+      { p: 90, d: "90", date: dates && fmt(dates.d90) },
       { p: 100, d: "100", date: dates && fmt(dates.d100) },
     ];
     return (
@@ -571,28 +730,39 @@ export default function HundredDayPlan() {
   const TeamPlans = () => {
     const [plans, setPlans] = useState([])
     const [members, setMembers] = useState({})
+    const [latestPulses, setLatestPulses] = useState({})
     const [loading, setLoading] = useState(true)
     const [expanded, setExpanded] = useState(null)
     const [filter, setFilter] = useState('all')   // 'all' | 'committed' | 'draft'
+    const [scope, setScope] = useState('current') // 'current' | 'past'
 
     useEffect(() => {
       (async () => {
         setLoading(true)
-        const [{ data: planRows }, { data: memberRows }] = await Promise.all([
+        const [{ data: planRows }, { data: memberRows }, { data: pulseRows }] = await Promise.all([
           supabase.from('hundred_day_plans').select('*').order('updated_at', { ascending: false }),
           supabase.from('profiles').select('id, full_name, position, role, avatar_url').eq('is_active', true),
+          supabase.from('hundred_day_plan_weekly_pulses').select('*').order('week_start', { ascending: false }),
         ])
         const memberMap = {}
         ;(memberRows || []).forEach(m => { memberMap[m.id] = m })
+        const pulseMap = {}
+        ;(pulseRows || []).forEach(pulse => { if (!pulseMap[pulse.plan_id]) pulseMap[pulse.plan_id] = pulse })
         setMembers(memberMap)
+        setLatestPulses(pulseMap)
         setPlans(planRows || [])
         setLoading(false)
       })()
     }, [])
 
-    const visible = plans.filter(p => filter === 'all' || p.status === filter)
-    const committed = plans.filter(p => p.status === 'committed').length
-    const drafts    = plans.filter(p => p.status === 'draft').length
+    const today = todayStr()
+    const isCurrent = p => Boolean(members[p.user_id]) && (!p.end_date || p.end_date >= today)
+    const currentPlans = plans.filter(isCurrent)
+    const pastPlans = plans.filter(p => !isCurrent(p))
+    const scopedPlans = scope === 'current' ? currentPlans : pastPlans
+    const visible = scopedPlans.filter(p => filter === 'all' || p.status === filter)
+    const committed = scopedPlans.filter(p => p.status === 'committed').length
+    const drafts = scopedPlans.filter(p => p.status === 'draft').length
 
     // ── EXPORT HELPERS ─────────────────────────────────────
     function downloadFile(name, text, type) {
@@ -663,9 +833,19 @@ export default function HundredDayPlan() {
         }
 
         L.push(`### Checkpoints`)
-        L.push(`- **Day 25:** ${p.checkpoints?.d25 || '—'}`)
-        L.push(`- **Day 50:** ${p.checkpoints?.d50 || '—'}`)
-        L.push(`- **Day 75:** ${p.checkpoints?.d75 || '—'}`)
+        L.push(`- **Day 30:** ${p.checkpoints?.d30 || p.checkpoints?.d25 || '—'}`)
+        L.push(`- **Day 60:** ${p.checkpoints?.d60 || p.checkpoints?.d50 || '—'}`)
+        L.push(`- **Day 90:** ${p.checkpoints?.d90 || p.checkpoints?.d75 || '—'}`)
+        L.push('')
+
+        const pulse = latestPulses[p.id]
+        L.push(`### Latest weekly execution pulse`)
+        L.push(`- **Week:** ${pulse?.week_start || 'Not submitted'}`)
+        L.push(`- **Status:** ${pulse ? pulseLabel(pulse.track_status) : 'Pulse due'}`)
+        L.push(`- **Milestone:** ${pulse?.milestone || '—'}`)
+        L.push(`- **Progress:** ${pulse?.progress_note || '—'}`)
+        L.push(`- **Blocker / ask:** ${pulse?.blocker || '—'}`)
+        L.push(`- **Next commitment:** ${pulse?.next_commitment || '—'}`)
         L.push('')
 
         L.push(`### Risks & resourcing`)
@@ -686,7 +866,7 @@ export default function HundredDayPlan() {
       const headers = [
         'Name','Role','Department','Status','Start','End','Confidence',
         'Anchored OKRs','Objectives','Key Results','Levers','Gameplans',
-        'D25','D50','D75','Blocker','Needs','Dependencies','Last Updated',
+        'D30','D60','D90','Latest Pulse Week','Execution Status','Pulse Progress','Pulse Blocker','Next Commitment','Blocker','Needs','Dependencies','Last Updated',
       ]
       const rows = [headers]
       visible.forEach(p => {
@@ -700,6 +880,7 @@ export default function HundredDayPlan() {
         ).join(' | ')
         const leverList = (p.objectives || []).filter(o => o.lever).map(o => o.lever).join(' | ')
         const initList  = (p.objectives || []).flatMap(o => (Array.isArray(o.initiatives) ? o.initiatives : [])).filter(x => x?.trim()).join(' | ')
+        const pulse = latestPulses[p.id]
         rows.push([
           p.name || m.full_name || '',
           p.role || POSITION_LABELS[m.position] || '',
@@ -713,9 +894,14 @@ export default function HundredDayPlan() {
           krList,
           leverList,
           initList,
-          p.checkpoints?.d25 || '',
-          p.checkpoints?.d50 || '',
-          p.checkpoints?.d75 || '',
+          p.checkpoints?.d30 || p.checkpoints?.d25 || '',
+          p.checkpoints?.d60 || p.checkpoints?.d50 || '',
+          p.checkpoints?.d90 || p.checkpoints?.d75 || '',
+          pulse?.week_start || '',
+          pulse ? pulseLabel(pulse.track_status) : 'Pulse due',
+          pulse?.progress_note || '',
+          pulse?.blocker || '',
+          pulse?.next_commitment || '',
           p.risks?.blocker || '',
           p.risks?.need || '',
           p.risks?.deps || '',
@@ -725,8 +911,7 @@ export default function HundredDayPlan() {
       return rows.map(r => r.map(escape).join(',')).join('\n')
     }
 
-    const today = new Date().toISOString().slice(0, 10)
-    const stamp = filter === 'all' ? today : `${today}-${filter}`
+    const stamp = `${today}-${scope}${filter === 'all' ? '' : `-${filter}`}`
 
     if (loading) return (
       <div className="hdp-team-toolbar" style={{ justifyContent: 'center' }}>
@@ -738,9 +923,13 @@ export default function HundredDayPlan() {
       <div className="hdp-fade">
         <div className="hdp-team-toolbar">
           <div className="hdp-team-stats">
-            <b>{plans.length}</b> plans · <b>{committed}</b> committed · <b>{drafts}</b> drafts
+            <b>{currentPlans.length}</b> current · <b>{pastPlans.length}</b> past · <b>{committed}</b> committed · <b>{drafts}</b> drafts
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+            <div className="hdp-tabs" style={{ margin: 0, border: 'none' }}>
+              <button className={scope === 'current' ? 'active' : ''} onClick={() => setScope('current')}>Current</button>
+              <button className={scope === 'past' ? 'active' : ''} onClick={() => setScope('past')}>Past plans ({pastPlans.length})</button>
+            </div>
             <div className="hdp-tabs" style={{ margin: 0, border: 'none' }}>
               {['all', 'committed', 'draft'].map(f => (
                 <button key={f} className={filter === f ? 'active' : ''} onClick={() => setFilter(f)}>
@@ -775,10 +964,12 @@ export default function HundredDayPlan() {
           <div className="hdp-empty">No plans match this filter.</div>
         ) : visible.map(p => {
           const m = members[p.user_id] || {}
-          const initials = (m.full_name || '?').split(' ').map(s => s[0]).slice(0,2).join('').toUpperCase()
+          const initials = (m.full_name || p.name || '?').split(' ').map(s => s[0]).slice(0,2).join('').toUpperCase()
           const updated = p.updated_at ? new Date(p.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '—'
           const isOpen = expanded === p.id
           const anchoredObjs = (okrCfg[p.department] || []).filter(o => (p.anchored_objective_ids || []).includes(o.id))
+          const pulse = latestPulses[p.id]
+          const pulseCurrent = pulse?.week_start === getMondayStr(new Date())
           return (
             <div key={p.id} className="hdp-team-row">
               <div className="hdp-team-row-h" onClick={() => setExpanded(isOpen ? null : p.id)}>
@@ -789,6 +980,9 @@ export default function HundredDayPlan() {
                 </div>
                 <span className={`hdp-team-tag ${p.status === 'committed' ? 'committed' : 'draft'}`}>
                   {p.status === 'committed' ? '✓ Committed' : '· Draft'}
+                </span>
+                <span className={`hdp-pulse-tag ${pulseCurrent ? pulse.track_status : 'due'}`}>
+                  {pulseCurrent ? pulseLabel(pulse.track_status) : 'Pulse due'}
                 </span>
                 <div className="hdp-team-meta">
                   {p.department || '—'}<br />
@@ -801,6 +995,22 @@ export default function HundredDayPlan() {
                   <div className="hdp-rev-meta" style={{ marginTop: 14, marginBottom: 16 }}>
                     {p.start_date && p.end_date && <>Window <b>{fmtY(p.start_date)} → {fmtY(p.end_date)}</b><br /></>}
                     Confidence <b>{p.confidence ?? '—'}/10</b>
+                  </div>
+
+                  <div className="hdp-rev-sec">
+                    <h3>Weekly execution<span className="bar" /></h3>
+                    {!pulse ? (
+                      <div className="hdp-empty" style={{ padding: 14 }}>No weekly pulse submitted yet.</div>
+                    ) : (
+                      <ul className="hdp-rev-list">
+                        <li>Week of {fmtY(pulse.week_start)} · {pulseLabel(pulse.track_status)}</li>
+                        <li>Milestone: {pulse.milestone || '—'}</li>
+                        <li>Metric now: {pulse.metric_now || '—'}</li>
+                        <li>Progress: {pulse.progress_note || '—'}</li>
+                        <li>Blocker / ask: {pulse.blocker || '—'}</li>
+                        <li>Next commitment: {pulse.next_commitment || '—'}</li>
+                      </ul>
+                    )}
                   </div>
 
                   <div className="hdp-rev-sec">
@@ -834,9 +1044,9 @@ export default function HundredDayPlan() {
                   <div className="hdp-rev-sec">
                     <h3>Checkpoints<span className="bar" /></h3>
                     <ul className="hdp-rev-list">
-                      <li>Day 25: {p.checkpoints?.d25 || '—'}</li>
-                      <li>Day 50: {p.checkpoints?.d50 || '—'}</li>
-                      <li>Day 75: {p.checkpoints?.d75 || '—'}</li>
+                      <li>Day 30: {p.checkpoints?.d30 || p.checkpoints?.d25 || '—'}</li>
+                      <li>Day 60: {p.checkpoints?.d60 || p.checkpoints?.d50 || '—'}</li>
+                      <li>Day 90: {p.checkpoints?.d90 || p.checkpoints?.d75 || '—'}</li>
                     </ul>
                   </div>
 
@@ -881,7 +1091,7 @@ export default function HundredDayPlan() {
               <div className="hdp-rev-meta" style={{ marginTop: 6 }}>
                 <b>{member.department || '—'}</b><br />
                 {dates && <>Window <b>{fmtY(dates.start)} → {fmtY(dates.d100)}</b><br />
-                  D25 {fmt(dates.d25)} · D50 {fmt(dates.d50)} · D75 {fmt(dates.d75)} · D100 {fmt(dates.d100)}<br /></>}
+                  D30 {fmt(dates.d30)} · D60 {fmt(dates.d60)} · D90 {fmt(dates.d90)} · D100 {fmt(dates.d100)}<br /></>}
                 Confidence <b>{confidence}/10</b>
               </div>
             </div>
@@ -896,6 +1106,8 @@ export default function HundredDayPlan() {
         </div>
 
         <Track />
+
+        <WeeklyPulse planId={planId} userId={profile?.id} />
 
         <div className="hdp-rev-sec" style={{ marginTop: 24 }}>
           <h3>Anchored OKRs<span className="bar" /></h3>
@@ -928,9 +1140,9 @@ export default function HundredDayPlan() {
         <div className="hdp-rev-sec">
           <h3>Checkpoints<span className="bar" /></h3>
           <ul className="hdp-rev-list">
-            <li>Day 25 ({dates ? fmt(dates.d25) : '—'}): {cps.d25 || '—'}</li>
-            <li>Day 50 ({dates ? fmt(dates.d50) : '—'}): {cps.d50 || '—'}</li>
-            <li>Day 75 ({dates ? fmt(dates.d75) : '—'}): {cps.d75 || '—'}</li>
+            <li>Day 30 ({dates ? fmt(dates.d30) : '—'}): {cps.d30 || '—'}</li>
+            <li>Day 60 ({dates ? fmt(dates.d60) : '—'}): {cps.d60 || '—'}</li>
+            <li>Day 90 ({dates ? fmt(dates.d90) : '—'}): {cps.d90 || '—'}</li>
           </ul>
         </div>
 
@@ -1004,7 +1216,7 @@ export default function HundredDayPlan() {
               {step === 0 && (<>
                 <div className="hdp-eyebrow">Step 01 — Setup<span className="bar" /></div>
                 <h2 className="hdp-h2">Who's planning, and when does the clock start?</h2>
-                <p className="hdp-sub">Your start date sets the whole cycle. We'll lock Day 25, 50, 75 and 100 to real calendar dates so checkpoints aren't vague.</p>
+                <p className="hdp-sub">Your start date sets the whole cycle. We'll lock Day 30, 60, 90 and 100 to real calendar dates so checkpoints aren't vague.</p>
                 <div className="hdp-row two">
                   <div className="hdp-field">
                     <label>Your name</label>
@@ -1025,10 +1237,11 @@ export default function HundredDayPlan() {
                   </div>
                   <div className="hdp-field">
                     <label>Cycle start date</label>
-                    <input type="date" className="hdp-input num" value={member.startDate} onChange={e => setMember({ ...member, startDate: e.target.value })} />
+                    <input type="date" className="hdp-input num" min="2020-01-01" max={addDays(todayStr(), 365).toISOString().slice(0, 10)} value={member.startDate} onChange={e => setMember({ ...member, startDate: e.target.value })} />
                   </div>
                 </div>
                 {dates && <div className="hdp-nudge"><Route size={14} /> Day 100 lands on {fmtY(dates.d100)}.</div>}
+                {member.startDate && !canContinue() && <div className="hdp-nudge"><ShieldAlert size={14} /> Choose a realistic start date between Jan 1, 2020 and one year from today.</div>}
               </>)}
 
               {/* STEP 1 — ANCHOR OKRs */}
@@ -1147,13 +1360,13 @@ export default function HundredDayPlan() {
                 <div className="hdp-eyebrow">Step 05 — Checkpoints<span className="bar" /></div>
                 <h2 className="hdp-h2">What's true at each checkpoint?</h2>
                 <p className="hdp-sub">A plan with no mid-points drifts. Write the one thing that must be true by each date. These become your weekly review anchors.</p>
-                {[["d25", "Day 25", dates && dates.d25], ["d50", "Day 50", dates && dates.d50], ["d75", "Day 75", dates && dates.d75]].map(([key, label, date]) => (
+                {[["d30", "Day 30", dates && dates.d30], ["d60", "Day 60", dates && dates.d60], ["d90", "Day 90", dates && dates.d90]].map(([key, label, date]) => (
                   <div className="hdp-cp" key={key}>
                     <div className="hdp-cp-h">
                       <span className="hdp-cp-day">{label}</span>
                       <span className="hdp-cp-date">{date ? fmtY(date) : "set a start date"}</span>
                     </div>
-                    <textarea className="hdp-area" value={cps[key]} placeholder={key === "d50" ? "Mid-cycle: on track to hit targets, or course-correcting because…" : "By this date, the following will be true…"} onChange={e => setCps({ ...cps, [key]: e.target.value })} />
+                    <textarea className="hdp-area" value={cps[key]} placeholder={key === "d60" ? "Mid-cycle: is this still the right goal, and what needs to change?" : "By this date, what must be true—and what will you flag if it is missed?"} onChange={e => setCps({ ...cps, [key]: e.target.value })} />
                   </div>
                 ))}
               </>)}
@@ -1162,7 +1375,7 @@ export default function HundredDayPlan() {
               {step === 5 && (<>
                 <div className="hdp-eyebrow">Step 06 — Risks & resourcing<span className="bar" /></div>
                 <h2 className="hdp-h2">What could stop this — and what do you need?</h2>
-                <p className="hdp-sub">Before asking for headcount, ask if a system or a tool solves it. Name the real blocker and the real need so leadership can act on it at Day 50, not Day 99.</p>
+                <p className="hdp-sub">Before asking for headcount, ask if a system or a tool solves it. Name the real blocker and the real need so leadership can act on it at Day 60, not Day 99.</p>
                 <div className="hdp-field" style={{ marginBottom: 18 }}>
                   <label>The most likely blocker</label>
                   <textarea className="hdp-area" value={risk.blocker} placeholder="What's most likely to get in the way?" onChange={e => setRisk({ ...risk, blocker: e.target.value })} />
@@ -1170,9 +1383,9 @@ export default function HundredDayPlan() {
                 <div className="hdp-field" style={{ marginBottom: 22 }}>
                   <label>What do you need to clear it?</label>
                   <div className="hdp-chips">
-                    {[["A system or process fix", Route], ["A tool", Gauge], ["A hire", Plus], ["A leadership decision", Flag]].map(([t, Ic]) => (
+                    {[["A system or process fix", Route], ["A tool", Gauge], ["A hire", Plus], ["A leadership decision", Flag]].map(([t]) => (
                       <button key={t} className={`hdp-chip${risk.need === t ? " on" : ""}`} onClick={() => setRisk({ ...risk, need: risk.need === t ? "" : t })}>
-                        <Ic size={14} className="ic" />{t}
+                        {t}
                       </button>
                     ))}
                   </div>
@@ -1202,7 +1415,7 @@ export default function HundredDayPlan() {
                   <div className="hdp-rev-meta">
                     <b>{member.department || "—"}</b><br />
                     {dates && <>Window <b>{fmtY(dates.start)} → {fmtY(dates.d100)}</b><br />
-                      D25 {fmt(dates.d25)} · D50 {fmt(dates.d50)} · D75 {fmt(dates.d75)} · D100 {fmt(dates.d100)}<br /></>}
+                      D30 {fmt(dates.d30)} · D60 {fmt(dates.d60)} · D90 {fmt(dates.d90)} · D100 {fmt(dates.d100)}<br /></>}
                     Confidence <b>{confidence}/10</b>
                   </div>
                 </div>
@@ -1234,9 +1447,9 @@ export default function HundredDayPlan() {
                 <div className="hdp-rev-sec">
                   <h3>Checkpoints<span className="bar" /></h3>
                   <ul className="hdp-rev-list">
-                    <li>Day 25 ({dates ? fmt(dates.d25) : "—"}): {cps.d25 || "—"}</li>
-                    <li>Day 50 ({dates ? fmt(dates.d50) : "—"}): {cps.d50 || "—"}</li>
-                    <li>Day 75 ({dates ? fmt(dates.d75) : "—"}): {cps.d75 || "—"}</li>
+                    <li>Day 30 ({dates ? fmt(dates.d30) : "—"}): {cps.d30 || "—"}</li>
+                    <li>Day 60 ({dates ? fmt(dates.d60) : "—"}): {cps.d60 || "—"}</li>
+                    <li>Day 90 ({dates ? fmt(dates.d90) : "—"}): {cps.d90 || "—"}</li>
                   </ul>
                 </div>
 
