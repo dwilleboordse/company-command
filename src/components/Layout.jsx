@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useTheme } from '../contexts/ThemeContext'
-import { LayoutDashboard, Target, Calendar, Video, LogOut, Settings, TrendingUp, TrendingDown, Users, DollarSign, Menu, X, FileText, Trophy, Heart, UserCheck, Sun, Moon, ClipboardCheck, BarChart3, Compass, ShieldCheck } from 'lucide-react'
+import { LayoutDashboard, Target, Calendar, Video, LogOut, Settings, TrendingUp, TrendingDown, Users, DollarSign, Menu, X, FileText, Trophy, Heart, UserCheck, Sun, Moon, ClipboardCheck, BarChart3, Compass, ShieldCheck, Network, BriefcaseBusiness } from 'lucide-react'
 
 export default function Layout() {
   const { profile, signOut, isCEO, isManagement, isOps } = useAuth()
@@ -71,6 +71,7 @@ export default function Layout() {
             <>
               <p className="nav-section-label">Clients</p>
               <NavLink to="/client-roster" className={nl}><Users size={16}/> Client Roster</NavLink>
+              {(isCEO || isOps) && <NavLink to="/design-cs" className={nl}><Network size={16}/> Design &amp; CS</NavLink>}
               <NavLink to="/clients" className={nl}><Heart size={16}/> Client Health</NavLink>
               <p className="nav-section-label">Team</p>
               <NavLink to="/team-health" className={nl}><UserCheck size={16}/> Team Health</NavLink>
@@ -80,6 +81,7 @@ export default function Layout() {
           {isCEO&&(
             <>
               <p className="nav-section-label">CEO Only</p>
+              <NavLink to="/hiring-roadmap" className={nl}><BriefcaseBusiness size={16}/> Hiring Roadmap</NavLink>
               <NavLink to="/ceo" className={nl}><TrendingUp size={16}/> Models</NavLink>
               <NavLink to="/admin" className={nl}><Settings size={16}/> Admin</NavLink>
             </>

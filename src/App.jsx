@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { lazy, Suspense } from 'react'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import Layout from './components/Layout'
 import Login from './pages/Login'
@@ -20,11 +21,19 @@ import HundredDayPlan from './pages/HundredDayPlan'
 import Accountability from './pages/Accountability'
 import ChurnAnalysis from './pages/ChurnAnalysis'
 
-function PR({ children, ceo=false, mgmt=false, ops=false }) {
+const DesignCSOverview = lazy(() => import('./pages/DesignCSOverview'))
+const HiringRoadmap = lazy(() => import('./pages/HiringRoadmap'))
+
+function LoadingPage({ children }) {
+  return <Suspense fallback={<div className="loading-screen"><div className="spinner"/></div>}>{children}</Suspense>
+}
+
+function PR({ children, ceo=false, mgmt=false, ops=false, ceoOps=false }) {
   const { user, profile, loading, isOps } = useAuth()
   if (loading) return <div className="loading-screen"><div className="spinner"/></div>
   if (!user) return <Navigate to="/login" replace/>
   if (ceo && profile?.role!=='ceo') return <Navigate to="/" replace/>
+  if (ceoOps && profile?.role !== 'ceo' && !isOps) return <Navigate to="/" replace/>
   if (mgmt && !['ceo','management'].includes(profile?.role) && !(ops && isOps)) return <Navigate to="/" replace/>
   return children
 }
@@ -50,8 +59,10 @@ function AppRoutes() {
         <Route path="analytics" element={<PR mgmt><Analytics/></PR>}/>
         <Route path="churn-analysis" element={<PR mgmt><ChurnAnalysis/></PR>}/>
         <Route path="client-roster" element={<PR mgmt ops><ClientRoster/></PR>}/>
+        <Route path="design-cs" element={<PR ceoOps><LoadingPage><DesignCSOverview/></LoadingPage></PR>}/>
         <Route path="onboarding" element={<PR><Onboarding/></PR>}/>
         <Route path="ceo" element={<PR ceo><CEOModels/></PR>}/>
+        <Route path="hiring-roadmap" element={<PR ceo><LoadingPage><HiringRoadmap/></LoadingPage></PR>}/>
         <Route path="admin" element={<PR ceo><Admin/></PR>}/>
       </Route>
     </Routes>
