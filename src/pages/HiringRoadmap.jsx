@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowRight, BriefcaseBusiness, CalendarDays, CheckCircle
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { loadDesignCsData } from '../lib/designCsData'
-import { buildHiringSignals, buildWorkloads, formatMonth, PLANNING_ROLES } from '../lib/workforcePlanning'
+import { buildHiringSignals, buildWorkloads, formatMonth, PLANNING_ROLES, projectGrowthScenario } from '../lib/workforcePlanning'
 import './WorkforcePlanning.css'
 
 const STATUS_LABELS = {
@@ -26,6 +26,16 @@ function urgencyLabel(signal) {
   return 'Capacity available'
 }
 
+function roleUnitLabel(signal) {
+  if (signal.key === 'editor') return 'video concepts'
+  if (signal.key === 'designer') return 'static concepts'
+  return signal.unit
+}
+
+function signedValue(value) {
+  return value > 0 ? `+${value}` : `${value}`
+}
+
 function SignalCard({ signal, onPlan }) {
   const danger = signal.signal === 'hire_now'
   return (
@@ -40,7 +50,7 @@ function SignalCard({ signal, onPlan }) {
       <div className="capacity-track"><div className={`capacity-fill ${danger ? 'overloaded' : signal.utilization >= 80 ? 'near_capacity' : 'healthy'}`} style={{ width: `${Math.min(signal.utilization, 100)}%` }}/></div>
       <div className="signal-stat-row">
         <span><strong>{signal.headcount}</strong> active</span>
-        <span><strong>{signal.used}</strong> / {signal.capacity} {signal.unit}</span>
+        <span><strong>{signal.used}</strong> / {signal.capacity} {roleUnitLabel(signal)}</span>
         <span><strong>{signal.overloaded.length}</strong> overloaded</span>
       </div>
       <p>{signal.action}{signal.requiredPeople > 0 ? ` · model suggests ${signal.requiredPeople} additional ${signal.requiredPeople === 1 ? 'person' : 'people'}.` : '.'}</p>
@@ -51,40 +61,40 @@ function SignalCard({ signal, onPlan }) {
 
 function ScenarioModel({ signals, settings, workingDays }) {
   const [newClients, setNewClients] = useState(3)
+  const [churnedClients, setChurnedClients] = useState(1)
   const [conceptsPerClient, setConceptsPerClient] = useState(20)
-  const [videosPerClient, setVideosPerClient] = useState(15)
-  const [ugcClients, setUgcClients] = useState(2)
+  const [videoConceptsPerClient, setVideoConceptsPerClient] = useState(15)
+  const [ugcClientRate, setUgcClientRate] = useState(67)
 
-  const projected = signals.map(signal => {
-    let addedLoad = 0
-    let unitCapacity = signal.headcount ? signal.capacity / signal.headcount : 1
-    if (signal.key === 'creative_strategist') addedLoad = newClients * conceptsPerClient
-    if (signal.key === 'editor') addedLoad = newClients * videosPerClient
-    if (signal.key === 'ugc_manager') addedLoad = ugcClients
-    const projectedUsed = signal.used + addedLoad
-    const projectedUtilization = signal.capacity ? Math.round((projectedUsed / signal.capacity) * 100) : 0
-    const peopleNeeded = Math.max(0, Math.ceil(projectedUsed / Math.max(unitCapacity, 1)) - signal.headcount)
-    return { ...signal, addedLoad, projectedUsed, projectedUtilization, peopleNeeded }
-  })
+  const scenario = useMemo(() => projectGrowthScenario({
+    signals,
+    newClients,
+    churnedClients,
+    conceptsPerClient,
+    videoConceptsPerClient,
+    ugcClientRate,
+  }), [signals, newClients, churnedClients, conceptsPerClient, videoConceptsPerClient, ugcClientRate])
 
   return (
     <section className="planning-section scenario-section">
       <div className="planning-section-heading">
-        <div><h2>Growth scenario</h2><p>Stress-test delivery capacity before accepting more work.</p></div>
-        <span>Planning model</span>
+        <div><h2>Growth and churn scenario</h2><p>Model the net delivery impact of clients won and clients leaving.</p></div>
+        <span>{signedValue(scenario.netClients)} net clients</span>
       </div>
       <div className="scenario-layout">
         <div className="scenario-inputs card">
           <label><span>New clients</span><input type="number" min="0" value={newClients} onChange={event => setNewClients(Number(event.target.value || 0))}/></label>
+          <label><span>Clients leaving</span><input type="number" min="0" value={churnedClients} onChange={event => setChurnedClients(Number(event.target.value || 0))}/></label>
           <label><span>Concepts per client</span><input type="number" min="0" value={conceptsPerClient} onChange={event => setConceptsPerClient(Number(event.target.value || 0))}/></label>
-          <label><span>Videos per client</span><input type="number" min="0" value={videosPerClient} onChange={event => setVideosPerClient(Number(event.target.value || 0))}/></label>
-          <label><span>UGC-enabled clients</span><input type="number" min="0" max={newClients} value={ugcClients} onChange={event => setUgcClients(Number(event.target.value || 0))}/></label>
-          <small>Assumes workload is distributed evenly. CS capacity uses the {settings.cs_min_clients}–{settings.cs_max_clients} client / {settings.cs_min_concepts}–{settings.cs_max_concepts} concept rule. Editors use {settings.editor_daily_capacity} videos × {workingDays} working days.</small>
+          <label><span>Video concepts per client</span><input type="number" min="0" max={conceptsPerClient} value={videoConceptsPerClient} onChange={event => setVideoConceptsPerClient(Number(event.target.value || 0))}/></label>
+          <label><span>UGC client coverage</span><div className="scenario-percent-input"><input type="number" min="0" max="100" value={ugcClientRate} onChange={event => setUgcClientRate(Number(event.target.value || 0))}/><span>%</span></div></label>
+          <div className="scenario-net-summary"><strong>{scenario.netClients}</strong><span>net clients</span><strong>{scenario.videoConceptsPerClient}</strong><span>video concepts/client</span><strong>{scenario.staticConceptsPerClient}</strong><span>static concepts/client</span></div>
+          <small>Churn removes the same average workload that a new client adds. CS capacity is {settings.cs_max_concepts} concepts/month. Editors produce {settings.editor_daily_capacity} video concepts/day; designers produce {settings.designer_daily_capacity} static concepts/day across {workingDays} working days. UGC remains client-based.</small>
         </div>
         <div className="scenario-results">
-          {projected.map(item => (
+          {scenario.projected.map(item => (
             <div className="scenario-result" key={item.key}>
-              <div><strong>{item.label}</strong><span>+{item.addedLoad} {item.unit}</span></div>
+              <div><strong>{item.label}</strong><span>{signedValue(item.loadChange)} {roleUnitLabel(item)}</span></div>
               <ArrowRight size={14}/>
               <div><strong className={item.projectedUtilization > 100 ? 'text-red' : item.projectedUtilization >= 80 ? 'text-amber' : 'text-green'}>{item.projectedUtilization}%</strong><span>{item.peopleNeeded ? `${item.peopleNeeded} hire${item.peopleNeeded === 1 ? '' : 's'} needed` : 'Covered by current team'}</span></div>
             </div>
@@ -217,6 +227,7 @@ export default function HiringRoadmap() {
     workloadsByRole: {
       creative_strategist: workloadSet.strategists,
       editor: workloadSet.editors,
+      designer: workloadSet.designers,
       ugc_manager: workloadSet.ugcManagers,
     },
     settings: data?.settings,
@@ -251,7 +262,7 @@ export default function HiringRoadmap() {
 
         <div className="planning-metrics">
           <div className="planning-metric"><span><Gauge size={14}/>Highest utilization</span><strong>{nextHire?.utilization || 0}%</strong><small>{nextHire?.label || 'No workload'}</small></div>
-          <div className={`planning-metric ${overloaded ? 'danger' : ''}`}><span><AlertTriangle size={14}/>Overloaded people</span><strong>{overloaded}</strong><small>Across CS, editors, and UGC</small></div>
+          <div className={`planning-metric ${overloaded ? 'danger' : ''}`}><span><AlertTriangle size={14}/>Overloaded people</span><strong>{overloaded}</strong><small>Across CS, editors, designers, and UGC</small></div>
           <div className="planning-metric"><span><BriefcaseBusiness size={14}/>Open hiring plans</span><strong>{activeHiring.length}</strong><small>{items.filter(item => item.status === 'hired').length} completed</small></div>
           <div className="planning-metric"><span><CalendarDays size={14}/>Capacity month</span><strong>{monthAllocations.length}</strong><small>Client workloads modeled</small></div>
         </div>
@@ -268,7 +279,7 @@ export default function HiringRoadmap() {
           <RoadmapTable items={items} userId={user.id} onUpdated={() => load(true)}/>
         </section>
 
-        <div className="planning-method-note"><Target size={15}/><span><strong>Decision rule:</strong> a hire is urgent when team demand exceeds modeled capacity. When only individuals are overloaded but aggregate capacity remains, the roadmap recommends rebalancing before adding headcount.</span><CheckCircle2 size={16}/></div>
+        <div className="planning-method-note"><Target size={15}/><span><strong>Decision rule:</strong> concepts are the common capacity unit for CS, editors, and designers. A hire is urgent when team demand exceeds modeled capacity; individual overload with available team capacity triggers rebalancing first.</span><CheckCircle2 size={16}/></div>
       </div>
 
       {planningSignal !== undefined && <HiringItemModal seed={planningSignal} userId={user.id} onClose={() => setPlanningSignal(undefined)} onSaved={() => load(true)}/>}

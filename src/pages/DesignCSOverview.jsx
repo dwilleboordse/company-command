@@ -43,8 +43,8 @@ function WorkloadCard({ person, type }) {
       </div>
       {type === 'creative_strategist' && (
         <div className="workload-split">
-          <span>{person.statics} static</span>
-          <span>{person.videos} video</span>
+          <span>{person.statics} static concepts</span>
+          <span>{person.videos} video concepts</span>
         </div>
       )}
       <div className="client-chip-list compact">
@@ -196,9 +196,10 @@ function AllocationTable({ allocations, peopleByKey, onEdit, onDelete }) {
     <div className="card planning-table-card">
       <div className="table-wrap">
         <table className="planning-table">
-          <thead><tr><th>Client</th><th>Strategist</th><th>Concepts</th><th>Editors</th><th>UGC</th><th></th></tr></thead>
+          <thead><tr><th>Client</th><th>Strategist</th><th>Concepts</th><th>Designers</th><th>Editors</th><th>UGC</th><th></th></tr></thead>
           <tbody>
             {allocations.map(item => {
+              const designers = (item.designer_keys || []).map(key => peopleByKey.get(key)?.display_name || 'Legacy').join(', ')
               const editors = (item.editor_keys || []).map(key => peopleByKey.get(key)?.display_name || 'Legacy').join(', ')
               const ugc = (item.ugc_manager_keys || []).map(key => peopleByKey.get(key)?.display_name || 'Legacy').join(', ')
               return (
@@ -206,13 +207,14 @@ function AllocationTable({ allocations, peopleByKey, onEdit, onDelete }) {
                   <td><strong>{item.client_name_snapshot}</strong>{!item.client_id && <span className="legacy-label">Legacy match needed</span>}</td>
                   <td>{peopleByKey.get(item.strategist_key)?.display_name || 'Unassigned'}</td>
                   <td><strong>{Number(item.statics || 0) + Number(item.videos || 0)}</strong><span className="table-subline">{item.statics} static · {item.videos} video</span></td>
+                  <td>{designers || '—'}</td>
                   <td>{editors || '—'}</td>
                   <td>{ugc || '—'}</td>
                   <td><div className="planning-row-actions"><button type="button" className="btn btn-ghost btn-icon btn-sm" onClick={() => onEdit(item)} aria-label={`Edit ${item.client_name_snapshot}`}><Pencil size={13}/></button><button type="button" className="btn btn-ghost btn-icon btn-sm text-red" onClick={() => onDelete(item)} aria-label={`Remove ${item.client_name_snapshot} from this month`}><Trash2 size={13}/></button></div></td>
                 </tr>
               )
             })}
-            {!allocations.length && <tr><td colSpan="6"><div className="empty-state"><p>No client workload has been entered for this month.</p></div></td></tr>}
+            {!allocations.length && <tr><td colSpan="7"><div className="empty-state"><p>No client workload has been entered for this month.</p></div></td></tr>}
           </tbody>
         </table>
       </div>
@@ -372,7 +374,7 @@ export default function DesignCSOverview() {
   const allocatedClientIds = new Set(monthAllocations.map(item => item.client_id).filter(Boolean))
   const addableClients = activeClients.filter(client => !allocatedClientIds.has(client.id))
   const totalConcepts = monthAllocations.reduce((sum, item) => sum + Number(item.statics || 0) + Number(item.videos || 0), 0)
-  const overloadedCount = [...workloads.strategists, ...workloads.editors, ...workloads.ugcManagers].filter(person => person.status === 'overloaded').length
+  const overloadedCount = [...workloads.strategists, ...workloads.editors, ...workloads.designers, ...workloads.ugcManagers].filter(person => person.status === 'overloaded').length
 
   return (
     <>
@@ -401,7 +403,7 @@ export default function DesignCSOverview() {
           <div className="planning-metrics">
             <div className="planning-metric"><span><BriefcaseBusiness size={14}/>Active clients</span><strong>{monthAllocations.length}</strong><small>{formatMonth(selectedMonth)}</small></div>
             <div className="planning-metric"><span><Activity size={14}/>Monthly concepts</span><strong>{totalConcepts}</strong><small>{monthAllocations.reduce((sum, item) => sum + Number(item.statics || 0), 0)} static · {monthAllocations.reduce((sum, item) => sum + Number(item.videos || 0), 0)} video</small></div>
-            <div className="planning-metric"><span><Users size={14}/>Delivery team</span><strong>{workloads.strategists.length + workloads.editors.length + workloads.ugcManagers.length}</strong><small>CS, editors, and UGC</small></div>
+            <div className="planning-metric"><span><Users size={14}/>Delivery team</span><strong>{workloads.strategists.length + workloads.editors.length + workloads.designers.length + workloads.ugcManagers.length}</strong><small>CS, editors, designers, and UGC</small></div>
             <div className={`planning-metric ${overloadedCount ? 'danger' : ''}`}><span><AlertTriangle size={14}/>Capacity risks</span><strong>{overloadedCount}</strong><small>{overloadedCount ? 'People above their limit' : 'No one above limit'}</small></div>
           </div>
         )}
@@ -409,8 +411,9 @@ export default function DesignCSOverview() {
         {tab === 'workload' && (
           <>
             {workloads.unmatchedKeys.length > 0 && <div className="planning-notice"><AlertTriangle size={15}/><span><strong>{workloads.unmatchedKeys.length} legacy team record{workloads.unmatchedKeys.length === 1 ? '' : 's'} need matching.</strong> Their historical work is preserved, but they are not counted as active Company Command headcount.</span></div>}
-            <WorkloadSection title="Creative strategists" subtitle={`Healthy range: ${data.settings.cs_min_clients}–${data.settings.cs_max_clients} clients or ${data.settings.cs_min_concepts}–${data.settings.cs_max_concepts} concepts per month.`} people={workloads.strategists} type="creative_strategist"/>
-            <WorkloadSection title="Video editors" subtitle={`${data.settings.editor_daily_capacity} videos per working day · ${selectedMonthRecord?.working_days || 22} working days.`} people={workloads.editors} type="editor"/>
+            <WorkloadSection title="Creative strategists" subtitle={`Healthy range: ${data.settings.cs_min_concepts}–${data.settings.cs_max_concepts} concepts per month. Client count remains visible as context.`} people={workloads.strategists} type="creative_strategist"/>
+            <WorkloadSection title="Video editors" subtitle={`${data.settings.editor_daily_capacity} video concepts per working day · ${selectedMonthRecord?.working_days || 22} working days.`} people={workloads.editors} type="editor"/>
+            <WorkloadSection title="Designers" subtitle={`${data.settings.designer_daily_capacity} static concepts per working day · two more concepts than editors.`} people={workloads.designers} type="designer"/>
             <WorkloadSection title="UGC managers" subtitle={`${data.settings.ugc_max_clients} active clients per UGC manager.`} people={workloads.ugcManagers} type="ugc_manager"/>
           </>
         )}

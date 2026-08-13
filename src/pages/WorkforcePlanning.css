@@ -213,7 +213,7 @@
 .next-hire-copy h2 { margin-top: 4px; font-size: 19px; }
 .next-hire-copy p { margin-top: 3px; color: var(--text-secondary); font-size: 11px; }
 
-.hiring-signal-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.hiring-signal-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .hiring-signal-card { padding: 15px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-card); box-shadow: var(--shadow-xs); }
 .hiring-signal-card.danger { border-color: rgba(220,38,38,.3); }
 .hiring-signal-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
@@ -227,6 +227,12 @@
 .scenario-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 14px; }
 .scenario-inputs label span { display: block; margin-bottom: 4px; color: var(--text-muted); font-size: 9px; font-weight: 700; text-transform: uppercase; }
 .scenario-inputs small { grid-column: 1 / -1; color: var(--text-muted); font-size: 9px; line-height: 1.5; }
+.scenario-percent-input { position: relative; }
+.scenario-percent-input input { padding-right: 28px; }
+.scenario-percent-input > span { position: absolute; top: 50%; right: 10px; margin: 0; color: var(--text-muted); transform: translateY(-50%); }
+.scenario-net-summary { grid-column: 1 / -1; display: grid; grid-template-columns: auto 1fr; gap: 3px 8px; padding: 9px 10px; border-radius: var(--radius); background: var(--bg); }
+.scenario-net-summary strong { color: var(--text-primary); font: 700 10px var(--font-mono); }
+.scenario-net-summary span { color: var(--text-muted); font-size: 9px; }
 .scenario-results { display: flex; flex-direction: column; gap: 8px; }
 .scenario-result { display: grid; grid-template-columns: 1fr 20px 1fr; align-items: center; gap: 8px; min-height: 61px; padding: 10px 13px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-card); }
 .scenario-result > div { min-width: 0; }
@@ -254,6 +260,7 @@
   .planning-tabs button { flex: 1 0 auto; justify-content: center; }
   .planning-metrics, .workload-grid, .hiring-signal-grid, .scenario-layout, .scenario-inputs { grid-template-columns: 1fr; }
   .scenario-inputs small { grid-column: auto; }
+  .scenario-net-summary { grid-column: auto; }
   .org-level { grid-template-columns: 1fr; }
   .org-people-grid { grid-template-columns: 1fr; }
   .org-connector { display: none; }
