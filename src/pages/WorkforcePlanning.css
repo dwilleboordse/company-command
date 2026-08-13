@@ -130,7 +130,7 @@
 .workload-split { display: flex; justify-content: space-between; margin-top: 7px; color: var(--text-muted); font: 500 9px var(--font-mono); }
 
 .workload-client-table-wrap { margin-top: 11px; overflow: hidden; border: 1px solid var(--border-light); border-radius: var(--radius); }
-.workload-client-table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.workload-client-table { width: 100%; min-width: 0; table-layout: fixed; border-collapse: collapse; }
 .workload-client-table th,
 .workload-client-table td { padding: 6px 7px; border-bottom: 1px solid var(--border-light); text-align: right; }
 .workload-client-table th { background: var(--bg); color: var(--text-muted); font: 700 8px var(--font-mono); letter-spacing: .65px; text-transform: uppercase; }
