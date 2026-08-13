@@ -25,8 +25,38 @@ function CapacityBar({ utilization, status }) {
   )
 }
 
+function WorkloadClientBreakdown({ assignments, showConcepts }) {
+  const sortedAssignments = [...assignments].sort((a, b) => a.client_name_snapshot.localeCompare(b.client_name_snapshot))
+
+  if (!sortedAssignments.length) return <div className="workload-client-empty">No clients assigned</div>
+
+  return (
+    <div className="workload-client-table-wrap">
+      <table className={`workload-client-table ${showConcepts ? '' : 'clients-only'}`}>
+        <thead>
+          <tr>
+            <th>Client</th>
+            {showConcepts && <th>Static</th>}
+            {showConcepts && <th>Video</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {sortedAssignments.map(item => (
+            <tr key={item.id}>
+              <td title={item.client_name_snapshot}>{item.client_name_snapshot}</td>
+              {showConcepts && <td><strong>{Number(item.statics || 0)}</strong></td>}
+              {showConcepts && <td><strong>{Number(item.videos || 0)}</strong></td>}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 function WorkloadCard({ person, type }) {
   const meta = statusMeta(person.status)
+  const showConcepts = ['creative_strategist', 'editor', 'designer'].includes(type)
   return (
     <article className="workload-card">
       <div className="workload-card-top">
@@ -47,10 +77,7 @@ function WorkloadCard({ person, type }) {
           <span>{person.videos} video concepts</span>
         </div>
       )}
-      <div className="client-chip-list compact">
-        {person.assignments.slice(0, 5).map(item => <span key={item.id}>{item.client_name_snapshot}</span>)}
-        {person.assignments.length > 5 && <span>+{person.assignments.length - 5} more</span>}
-      </div>
+      <WorkloadClientBreakdown assignments={person.assignments} showConcepts={showConcepts}/>
     </article>
   )
 }
