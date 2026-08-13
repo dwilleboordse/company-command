@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildHiringSignals, buildWorkloads, DEFAULT_CAPACITY, projectGrowthScenario } from './workforcePlanning.js'
+import { buildHiringSignals, buildRosterAllocations, buildWorkloads, DEFAULT_CAPACITY, projectGrowthScenario } from './workforcePlanning.js'
 
 const people = [
   { source_key: 'cs-1', display_name: 'CS One', discipline: 'creative_strategist', is_active: true },
@@ -95,4 +95,61 @@ test('growth scenario subtracts churn before projecting role capacity', () => {
   assert.equal(scenario.projected.find(signal => signal.key === 'editor').loadChange, 45)
   assert.equal(scenario.projected.find(signal => signal.key === 'designer').loadChange, 15)
   assert.equal(scenario.projected.find(signal => signal.key === 'ugc_manager').loadChange, 2)
+})
+
+test('client roster creates the live allocation and includes UGC concepts in video workload', () => {
+  const rosterPeople = people.map((person, index) => ({ ...person, profile_id: `profile-${index + 1}` }))
+  const result = buildRosterAllocations({
+    monthStart: '2026-08-01',
+    people: rosterPeople,
+    clients: [{
+      id: 'client-1',
+      name: 'Roster Client',
+      is_active: true,
+      is_archived: false,
+      cs_ids: ['profile-1'],
+      editor_ids: ['profile-2'],
+      designer_ids: ['profile-3'],
+      ugc_ids: ['profile-4'],
+      creatives: {
+        static: { concepts: 7, variations: 3 },
+        video: { concepts: 8, variations: 3 },
+        ugc: { concepts: 5, variations: 3 },
+      },
+    }],
+  })
+
+  assert.equal(result.length, 1)
+  assert.equal(result[0].statics, 7)
+  assert.equal(result[0].videos, 13)
+  assert.deepEqual(result[0].strategist_keys, ['cs-1'])
+  assert.deepEqual(result[0].editor_keys, ['editor-1'])
+})
+
+test('shared roster assignments split capacity instead of double-counting concepts', () => {
+  const sharedPeople = [
+    ...people,
+    { source_key: 'cs-2', display_name: 'CS Two', discipline: 'creative_strategist', is_active: true },
+    { source_key: 'editor-2', display_name: 'Editor Two', discipline: 'editor', daily_capacity: 5, is_active: true },
+  ]
+  const result = buildWorkloads({
+    people: sharedPeople,
+    settings: DEFAULT_CAPACITY,
+    workingDays: 22,
+    allocations: [{
+      id: 'shared-client',
+      client_name_snapshot: 'Shared Client',
+      strategist_keys: ['cs-1', 'cs-2'],
+      statics: 10,
+      videos: 30,
+      designer_keys: [],
+      editor_keys: ['editor-1', 'editor-2'],
+      ugc_manager_keys: [],
+    }],
+  })
+
+  assert.equal(result.strategists[0].concepts, 20)
+  assert.equal(result.strategists[1].concepts, 20)
+  assert.equal(result.editors[0].videos, 15)
+  assert.equal(result.editors[1].videos, 15)
 })

@@ -160,38 +160,21 @@ function ClientModal({ client, allMembers, onClose, onSave }) {
       creatives: form.creatives,
     }
     if (isEdit) {
-      // Save core assignment fields first (always exist)
-      const corePayload = {
-        cs_ids: payload.cs_ids,
-        mb_ids: payload.mb_ids,
-        editor_ids: payload.editor_ids,
-        designer_ids: payload.designer_ids,
-        ugc_ids: payload.ugc_ids,
-        assigned_cs_id: payload.assigned_cs_id,
-        name: payload.name,
-      }
-      const {data: coreData, error: coreError} = await supabase
+      const {data: savedClient, error: saveError} = await supabase
         .from('clients')
-        .update(corePayload)
+        .update(payload)
         .eq('id', client.id)
         .select()
-      if (coreError) {
-        alert('Save failed: ' + coreError.message)
+      if (saveError) {
+        alert('Save failed: ' + saveError.message)
         setSaving(false)
         return
       }
-      if (!coreData || coreData.length === 0) {
+      if (!savedClient || savedClient.length === 0) {
         alert('Save did not apply — your account may not have permission to edit clients. Ask the CEO to check RLS policies for the clients table.')
         setSaving(false)
         return
       }
-      // Try extended fields separately — silently skip if columns don't exist yet
-      const extPayload = {
-        package_type: payload.package_type,
-        channels: payload.channels,
-        creatives: payload.creatives,
-      }
-      await supabase.from('clients').update(extPayload).eq('id', client.id)
     } else {
       const {data:newClient, error} = await supabase.from('clients')
         .insert({...payload, is_active:true, is_archived:false}).select().single()

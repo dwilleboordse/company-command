@@ -1,19 +1,24 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Activity, AlertTriangle, BriefcaseBusiness, ChevronRight, Copy, LayoutDashboard, Network, Pencil, Plus, Trash2, Users, X } from 'lucide-react'
+import { Activity, AlertTriangle, BriefcaseBusiness, CheckCircle2, ChevronRight, Copy, GripVertical, LayoutDashboard, Network, Pencil, Users, X } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { loadDesignCsData, persistVirtualPeople } from '../lib/designCsData'
-import { buildWorkloads, formatMonth, initials, nextMonthStart, parseIds, roleLabel, statusMeta } from '../lib/workforcePlanning'
+import { buildRosterAllocations, buildWorkloads, formatMonth, initials, nextMonthStart, parseIds, roleLabel, statusMeta } from '../lib/workforcePlanning'
 import './WorkforcePlanning.css'
 
 const EMPTY_FORM = {
   client_id: '',
-  strategist_key: '',
+  strategist_profile_ids: [],
   statics: 0,
-  videos: 0,
-  designer_keys: [],
-  editor_keys: [],
-  ugc_manager_keys: [],
+  video_concepts: 0,
+  ugc_concepts: 0,
+  designer_profile_ids: [],
+  editor_profile_ids: [],
+  ugc_manager_profile_ids: [],
+}
+
+function formatConcepts(value) {
+  return Number.isInteger(Number(value)) ? Number(value) : Number(value).toFixed(1)
 }
 
 function CapacityBar({ utilization, status }) {
@@ -25,7 +30,7 @@ function CapacityBar({ utilization, status }) {
   )
 }
 
-function WorkloadClientBreakdown({ assignments, showConcepts }) {
+function WorkloadClientBreakdown({ assignments, showConcepts, type, canDrag, onDragStart, onDragEnd }) {
   const sortedAssignments = [...assignments].sort((a, b) => a.client_name_snapshot.localeCompare(b.client_name_snapshot))
 
   if (!sortedAssignments.length) return <div className="workload-client-empty">No clients assigned</div>
@@ -42,10 +47,18 @@ function WorkloadClientBreakdown({ assignments, showConcepts }) {
         </thead>
         <tbody>
           {sortedAssignments.map(item => (
-            <tr key={item.id}>
-              <td title={item.client_name_snapshot}>{item.client_name_snapshot}</td>
-              {showConcepts && <td><strong>{Number(item.statics || 0)}</strong></td>}
-              {showConcepts && <td><strong>{Number(item.videos || 0)}</strong></td>}
+            <tr
+              key={item.id}
+              draggable={canDrag && Boolean(item.client_id)}
+              className={canDrag && item.client_id ? 'workload-client-draggable' : ''}
+              onDragStart={event => onDragStart?.(event, item, type)}
+              onDragEnd={onDragEnd}
+            >
+              <td title={item.client_name_snapshot}>
+                <span className="workload-client-name">{canDrag && item.client_id && <GripVertical size={11}/>} {item.client_name_snapshot}</span>
+              </td>
+              {showConcepts && <td><strong>{formatConcepts(item.statics || 0)}</strong></td>}
+              {showConcepts && <td><strong>{formatConcepts(item.videos || 0)}</strong></td>}
             </tr>
           ))}
         </tbody>
@@ -54,11 +67,19 @@ function WorkloadClientBreakdown({ assignments, showConcepts }) {
   )
 }
 
-function WorkloadCard({ person, type }) {
+function WorkloadCard({ person, type, canDrop, onDropClient, onDragStart, onDragEnd }) {
   const meta = statusMeta(person.status)
   const showConcepts = ['creative_strategist', 'editor', 'designer'].includes(type)
   return (
-    <article className="workload-card">
+    <article
+      className={`workload-card ${canDrop ? 'drop-ready' : ''}`}
+      onDragOver={event => canDrop && event.preventDefault()}
+      onDrop={event => {
+        if (!canDrop) return
+        event.preventDefault()
+        onDropClient(person, type)
+      }}
+    >
       <div className="workload-card-top">
         <div className="planning-avatar">{initials(person.display_name)}</div>
         <div className="workload-person">
@@ -77,13 +98,51 @@ function WorkloadCard({ person, type }) {
           <span>{person.videos} video concepts</span>
         </div>
       )}
-      <WorkloadClientBreakdown assignments={person.assignments} showConcepts={showConcepts}/>
+      {canDrop && <div className="workload-drop-hint">Drop to assign here</div>}
+      <WorkloadClientBreakdown
+        assignments={person.assignments}
+        showConcepts={showConcepts}
+        type={type}
+        canDrag={Boolean(onDragStart)}
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
+      />
     </article>
   )
 }
 
-function WorkloadSection({ title, subtitle, people, type }) {
+function UnassignedWorkloads({ allocations, type, onDragStart, onDragEnd }) {
+  if (!allocations.length) return null
+  return (
+    <div className="workload-unassigned">
+      <div><AlertTriangle size={13}/><strong>Unassigned</strong><span>Drag a client onto a team member</span></div>
+      <div className="workload-unassigned-list">
+        {allocations.map(item => (
+          <button
+            type="button"
+            key={item.id}
+            draggable
+            onDragStart={event => onDragStart(event, item, type)}
+            onDragEnd={onDragEnd}
+          >
+            <GripVertical size={11}/>
+            <strong>{item.client_name_snapshot}</strong>
+            {type !== 'ugc_manager' && <span>{formatConcepts(Number(item.statics || 0) + Number(item.videos || 0))} concepts</span>}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function WorkloadSection({ title, subtitle, people, allocations, type, draggedRole, onDropClient, onDragStart, onDragEnd }) {
   const sorted = [...people].sort((a, b) => b.utilization - a.utilization || a.display_name.localeCompare(b.display_name))
+  const unassigned = onDragStart ? allocations.filter(item => {
+    if (type === 'creative_strategist') return !(item.strategist_keys?.length || item.strategist_key)
+    if (type === 'editor') return Number(item.videos || 0) > 0 && !(item.editor_keys || []).length
+    if (type === 'designer') return Number(item.statics || 0) > 0 && !(item.designer_keys || []).length
+    return Number(item.ugc_concepts || 0) > 0 && !(item.ugc_manager_keys || []).length
+  }) : []
   return (
     <section className="planning-section">
       <div className="planning-section-heading">
@@ -93,8 +152,19 @@ function WorkloadSection({ title, subtitle, people, type }) {
         </div>
         <span>{people.length} people</span>
       </div>
+      <UnassignedWorkloads allocations={unassigned} type={type} onDragStart={onDragStart} onDragEnd={onDragEnd}/>
       <div className="workload-grid">
-        {sorted.map(person => <WorkloadCard key={person.source_key} person={person} type={type}/>) }
+        {sorted.map(person => (
+          <WorkloadCard
+            key={person.source_key}
+            person={person}
+            type={type}
+            canDrop={draggedRole === type && Boolean(person.profile_id)}
+            onDropClient={onDropClient}
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+          />
+        ))}
         {!sorted.length && <div className="empty-state"><p>No active people are mapped to this role.</p></div>}
       </div>
     </section>
@@ -107,13 +177,13 @@ function MultiChecks({ label, options, value, onChange }) {
       <legend>{label}</legend>
       <div>
         {options.map(person => {
-          const checked = value.includes(person.source_key)
+          const checked = value.includes(person.profile_id)
           return (
-            <label key={person.source_key}>
+            <label key={person.profile_id}>
               <input
                 type="checkbox"
                 checked={checked}
-                onChange={() => onChange(checked ? value.filter(key => key !== person.source_key) : [...value, person.source_key])}
+                onChange={() => onChange(checked ? value.filter(id => id !== person.profile_id) : [...value, person.profile_id])}
               />
               <span>{person.display_name}</span>
             </label>
@@ -124,15 +194,16 @@ function MultiChecks({ label, options, value, onChange }) {
   )
 }
 
-function AllocationModal({ allocation, monthStart, clients, people, userId, onClose, onSaved }) {
+function AllocationModal({ allocation, monthStart, clients, people, onClose, onSaved }) {
   const [form, setForm] = useState(allocation ? {
     client_id: allocation.client_id || '',
-    strategist_key: allocation.strategist_key || '',
+    strategist_profile_ids: allocation.strategist_profile_ids || [],
     statics: allocation.statics || 0,
-    videos: allocation.videos || 0,
-    designer_keys: allocation.designer_keys || [],
-    editor_keys: allocation.editor_keys || [],
-    ugc_manager_keys: allocation.ugc_manager_keys || [],
+    video_concepts: allocation.video_concepts || 0,
+    ugc_concepts: allocation.ugc_concepts || 0,
+    designer_profile_ids: allocation.designer_profile_ids || [],
+    editor_profile_ids: allocation.editor_profile_ids || [],
+    ugc_manager_profile_ids: allocation.ugc_manager_profile_ids || [],
   } : EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -142,31 +213,39 @@ function AllocationModal({ allocation, monthStart, clients, people, userId, onCl
   async function save(event) {
     event.preventDefault()
     const client = clients.find(item => item.id === form.client_id)
-    if (!client || !form.strategist_key) return
+    if (!client) return
     setSaving(true)
     setError('')
     try {
-      const selectedKeys = [form.strategist_key, ...form.designer_keys, ...form.editor_keys, ...form.ugc_manager_keys]
-      await persistVirtualPeople(people.filter(person => selectedKeys.includes(person.source_key)))
+      const selectedProfileIds = [
+        ...form.strategist_profile_ids,
+        ...form.designer_profile_ids,
+        ...form.editor_profile_ids,
+        ...form.ugc_manager_profile_ids,
+      ]
+      await persistVirtualPeople(people.filter(person => selectedProfileIds.includes(person.profile_id)))
+      const currentCreatives = client.creatives || {}
       const payload = {
-        month_start: monthStart,
-        source_key: allocation?.source_key || `cc:${client.id}`,
-        client_id: client.id,
-        client_name_snapshot: allocation?.client_name_snapshot || client.name,
-        strategist_key: form.strategist_key,
-        statics: Number(form.statics || 0),
-        videos: Number(form.videos || 0),
-        designer_keys: form.designer_keys,
-        editor_keys: form.editor_keys,
-        ugc_manager_keys: form.ugc_manager_keys,
-        ugc_enabled: form.ugc_manager_keys.length > 0,
-        updated_by: userId,
+        cs_ids: form.strategist_profile_ids,
+        assigned_cs_id: form.strategist_profile_ids[0] || null,
+        designer_ids: form.designer_profile_ids,
+        editor_ids: form.editor_profile_ids,
+        ugc_ids: form.ugc_manager_profile_ids,
+        creatives: {
+          ...currentCreatives,
+          static: { ...(currentCreatives.static || {}), concepts: Number(form.statics || 0) },
+          video: { ...(currentCreatives.video || {}), concepts: Number(form.video_concepts || 0) },
+          ugc: { ...(currentCreatives.ugc || {}), concepts: Number(form.ugc_concepts || 0) },
+        },
       }
-      const query = allocation
-        ? supabase.from('design_cs_allocations').update(payload).eq('id', allocation.id)
-        : supabase.from('design_cs_allocations').insert(payload)
-      const { error: saveError } = await query
+      const { data: savedClient, error: saveError } = await supabase
+        .from('clients')
+        .update(payload)
+        .eq('id', client.id)
+        .select('id')
+        .single()
       if (saveError) throw saveError
+      if (!savedClient) throw new Error('The Client Roster did not accept this update.')
       await onSaved()
       onClose()
     } catch (saveError) {
@@ -181,8 +260,8 @@ function AllocationModal({ allocation, monthStart, clients, people, userId, onCl
       <form className="modal planning-modal" role="dialog" aria-modal="true" aria-labelledby="allocation-title" onSubmit={save}>
         <div className="planning-modal-header">
           <div>
-            <h2 id="allocation-title" className="modal-title">{allocation ? 'Edit workload' : 'Add client workload'}</h2>
-            <p>{formatMonth(monthStart)}</p>
+            <h2 id="allocation-title" className="modal-title">Edit client allocation</h2>
+            <p>{formatMonth(monthStart)} · saves to the Client Roster</p>
           </div>
           <button type="button" className="btn btn-ghost btn-icon" onClick={onClose} aria-label="Close"><X size={16}/></button>
         </div>
@@ -193,32 +272,29 @@ function AllocationModal({ allocation, monthStart, clients, people, userId, onCl
           {clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
         </select>
 
-        <label className="field-label">Creative strategist</label>
-        <select value={form.strategist_key} onChange={event => setForm(current => ({ ...current, strategist_key: event.target.value }))} required>
-          <option value="">Select strategist…</option>
-          {optionsFor('creative_strategist').map(person => <option key={person.source_key} value={person.source_key}>{person.display_name}</option>)}
-        </select>
+        <MultiChecks label="Creative strategists" options={optionsFor('creative_strategist')} value={form.strategist_profile_ids} onChange={strategist_profile_ids => setForm(current => ({ ...current, strategist_profile_ids }))}/>
 
         <div className="planning-form-grid">
           <label><span>Static concepts</span><input type="number" min="0" value={form.statics} onChange={event => setForm(current => ({ ...current, statics: event.target.value }))}/></label>
-          <label><span>Video concepts</span><input type="number" min="0" value={form.videos} onChange={event => setForm(current => ({ ...current, videos: event.target.value }))}/></label>
+          <label><span>Video concepts</span><input type="number" min="0" value={form.video_concepts} onChange={event => setForm(current => ({ ...current, video_concepts: event.target.value }))}/></label>
+          <label><span>UGC video concepts</span><input type="number" min="0" value={form.ugc_concepts} onChange={event => setForm(current => ({ ...current, ugc_concepts: event.target.value }))}/></label>
         </div>
 
-        <MultiChecks label="Designers" options={optionsFor('designer')} value={form.designer_keys} onChange={designer_keys => setForm(current => ({ ...current, designer_keys }))}/>
-        <MultiChecks label="Editors" options={optionsFor('editor')} value={form.editor_keys} onChange={editor_keys => setForm(current => ({ ...current, editor_keys }))}/>
-        <MultiChecks label="UGC managers" options={optionsFor('ugc_manager')} value={form.ugc_manager_keys} onChange={ugc_manager_keys => setForm(current => ({ ...current, ugc_manager_keys }))}/>
+        <MultiChecks label="Designers" options={optionsFor('designer')} value={form.designer_profile_ids} onChange={designer_profile_ids => setForm(current => ({ ...current, designer_profile_ids }))}/>
+        <MultiChecks label="Editors" options={optionsFor('editor')} value={form.editor_profile_ids} onChange={editor_profile_ids => setForm(current => ({ ...current, editor_profile_ids }))}/>
+        <MultiChecks label="UGC managers" options={optionsFor('ugc_manager')} value={form.ugc_manager_profile_ids} onChange={ugc_manager_profile_ids => setForm(current => ({ ...current, ugc_manager_profile_ids }))}/>
 
         {error && <div className="planning-error">{error}</div>}
         <div className="planning-modal-actions">
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn btn-primary" disabled={saving || !form.client_id || !form.strategist_key}>{saving ? 'Saving…' : 'Save workload'}</button>
+          <button type="submit" className="btn btn-primary" disabled={saving || !form.client_id}>{saving ? 'Saving…' : 'Save to Client Roster'}</button>
         </div>
       </form>
     </div>
   )
 }
 
-function AllocationTable({ allocations, peopleByKey, onEdit, onDelete }) {
+function AllocationTable({ allocations, peopleByKey, onEdit, isLive }) {
   return (
     <div className="card planning-table-card">
       <div className="table-wrap">
@@ -226,18 +302,24 @@ function AllocationTable({ allocations, peopleByKey, onEdit, onDelete }) {
           <thead><tr><th>Client</th><th>Strategist</th><th>Concepts</th><th>Designers</th><th>Editors</th><th>UGC</th><th></th></tr></thead>
           <tbody>
             {allocations.map(item => {
+              const strategistKeys = item.strategist_keys?.length ? item.strategist_keys : item.strategist_key ? [item.strategist_key] : []
+              const strategists = strategistKeys.map(key => peopleByKey.get(key)?.display_name || 'Legacy').join(', ')
               const designers = (item.designer_keys || []).map(key => peopleByKey.get(key)?.display_name || 'Legacy').join(', ')
               const editors = (item.editor_keys || []).map(key => peopleByKey.get(key)?.display_name || 'Legacy').join(', ')
               const ugc = (item.ugc_manager_keys || []).map(key => peopleByKey.get(key)?.display_name || 'Legacy').join(', ')
               return (
                 <tr key={item.id}>
                   <td><strong>{item.client_name_snapshot}</strong>{!item.client_id && <span className="legacy-label">Legacy match needed</span>}</td>
-                  <td>{peopleByKey.get(item.strategist_key)?.display_name || 'Unassigned'}</td>
-                  <td><strong>{Number(item.statics || 0) + Number(item.videos || 0)}</strong><span className="table-subline">{item.statics} static · {item.videos} video</span></td>
+                  <td>{strategists || 'Unassigned'}</td>
+                  <td><strong>{formatConcepts(Number(item.statics || 0) + Number(item.videos || 0))}</strong><span className="table-subline">{formatConcepts(item.statics)} static · {formatConcepts(item.videos)} video</span></td>
                   <td>{designers || '—'}</td>
                   <td>{editors || '—'}</td>
                   <td>{ugc || '—'}</td>
-                  <td><div className="planning-row-actions"><button type="button" className="btn btn-ghost btn-icon btn-sm" onClick={() => onEdit(item)} aria-label={`Edit ${item.client_name_snapshot}`}><Pencil size={13}/></button><button type="button" className="btn btn-ghost btn-icon btn-sm text-red" onClick={() => onDelete(item)} aria-label={`Remove ${item.client_name_snapshot} from this month`}><Trash2 size={13}/></button></div></td>
+                  <td>
+                    {isLive
+                      ? <div className="planning-row-actions"><button type="button" className="btn btn-ghost btn-icon btn-sm" onClick={() => onEdit(item)} aria-label={`Edit ${item.client_name_snapshot}`}><Pencil size={13}/></button></div>
+                      : <span className="snapshot-label">Snapshot</span>}
+                  </td>
                 </tr>
               )
             })}
@@ -311,6 +393,8 @@ export default function DesignCSOverview() {
   const [tab, setTab] = useState('workload')
   const [editing, setEditing] = useState(undefined)
   const [cloning, setCloning] = useState(false)
+  const [draggedAllocation, setDraggedAllocation] = useState(null)
+  const [syncMessage, setSyncMessage] = useState('')
 
   async function load(keepMonth = true) {
     setError('')
@@ -328,7 +412,17 @@ export default function DesignCSOverview() {
 
   useEffect(() => { load(false) }, [])
 
-  const monthAllocations = useMemo(() => (data?.allocations || []).filter(item => item.month_start === selectedMonth), [data?.allocations, selectedMonth])
+  const latestMonth = data?.months.at(-1)?.month_start || ''
+  const isLiveMonth = Boolean(selectedMonth) && selectedMonth === latestMonth
+  const liveAllocations = useMemo(() => buildRosterAllocations({
+    clients: data?.clients || [],
+    people: data?.people || [],
+    monthStart: latestMonth,
+  }), [data?.clients, data?.people, latestMonth])
+  const monthAllocations = useMemo(() => {
+    if (isLiveMonth) return liveAllocations
+    return (data?.allocations || []).filter(item => item.month_start === selectedMonth)
+  }, [data?.allocations, isLiveMonth, liveAllocations, selectedMonth])
   const peopleByKey = useMemo(() => new Map((data?.people || []).map(person => [person.source_key, person])), [data?.people])
   const selectedMonthRecord = data?.months.find(month => month.month_start === selectedMonth)
   const workloads = useMemo(() => buildWorkloads({
@@ -357,12 +451,14 @@ export default function DesignCSOverview() {
       })
       if (monthError) throw monthError
       if (monthAllocations.length) {
+        await persistVirtualPeople(data.people)
         const copies = monthAllocations.map(item => ({
           month_start: newMonth,
           source_key: item.source_key,
           client_id: item.client_id,
           client_name_snapshot: item.client_name_snapshot,
           strategist_key: item.strategist_key,
+          strategist_keys: item.strategist_keys?.length ? item.strategist_keys : item.strategist_key ? [item.strategist_key] : [],
           statics: item.statics,
           videos: item.videos,
           designer_keys: item.designer_keys,
@@ -384,22 +480,57 @@ export default function DesignCSOverview() {
     }
   }
 
-  async function deleteAllocation(allocation) {
-    if (!confirm(`Remove "${allocation.client_name_snapshot}" from ${formatMonth(selectedMonth)}? Other months and the client roster will not be changed.`)) return
-    const { error: deleteError } = await supabase.from('design_cs_allocations').delete().eq('id', allocation.id)
-    if (deleteError) {
-      setError(deleteError.message || 'Unable to remove this monthly allocation.')
+  function startClientDrag(event, allocation, type) {
+    if (!isLiveMonth || !allocation.client_id) return
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', allocation.client_id)
+    setDraggedAllocation({ allocation, type })
+  }
+
+  async function moveClient(person, type) {
+    if (!draggedAllocation || draggedAllocation.type !== type || !person.profile_id) return
+    const rosterField = {
+      creative_strategist: 'cs_ids',
+      editor: 'editor_ids',
+      designer: 'designer_ids',
+      ugc_manager: 'ugc_ids',
+    }[type]
+    const clientId = draggedAllocation.allocation.client_id
+    const client = data.clients.find(item => item.id === clientId)
+    if (!client || !rosterField) return
+    const nextIds = [person.profile_id]
+    const currentIds = parseIds(client[rosterField])
+    setDraggedAllocation(null)
+    if (currentIds.length === 1 && currentIds[0] === person.profile_id) return
+
+    setError('')
+    setSyncMessage('')
+    const updates = {
+      [rosterField]: nextIds,
+      ...(type === 'creative_strategist' ? { assigned_cs_id: person.profile_id } : {}),
+    }
+    setData(current => ({
+      ...current,
+      clients: current.clients.map(item => item.id === clientId ? { ...item, ...updates } : item),
+    }))
+
+    const { data: savedClient, error: moveError } = await supabase
+      .from('clients')
+      .update(updates)
+      .eq('id', clientId)
+      .select('id')
+      .single()
+    if (moveError || !savedClient) {
+      setError(moveError?.message || 'The Client Roster did not accept this assignment change.')
+      await load(true)
       return
     }
-    await load(true)
+    setSyncMessage(`${client.name} moved to ${person.display_name}. Client Roster and workload are now in sync.`)
   }
 
   if (!isCEO && !isOps) return <div className="page-body"><div className="empty-state"><p>CEO or Operations access required.</p></div></div>
   if (loading) return <div className="loading-screen"><div className="spinner"/></div>
 
-  const activeClients = (data?.clients || []).filter(client => client.is_active !== false && !client.is_archived)
-  const allocatedClientIds = new Set(monthAllocations.map(item => item.client_id).filter(Boolean))
-  const addableClients = activeClients.filter(client => !allocatedClientIds.has(client.id))
   const totalConcepts = monthAllocations.reduce((sum, item) => sum + Number(item.statics || 0) + Number(item.videos || 0), 0)
   const overloadedCount = [...workloads.strategists, ...workloads.editors, ...workloads.designers, ...workloads.ugcManagers].filter(person => person.status === 'overloaded').length
 
@@ -413,13 +544,13 @@ export default function DesignCSOverview() {
         </div>
         <div className="planning-header-actions">
           {tab !== 'org' && <select aria-label="Month" value={selectedMonth} onChange={event => setSelectedMonth(event.target.value)}>{data?.months.map(month => <option key={month.month_start} value={month.month_start}>{month.label}</option>)}</select>}
-          {tab === 'allocations' && <button type="button" className="btn btn-ghost" onClick={cloneMonth} disabled={cloning || !selectedMonth}><Copy size={14}/>{cloning ? 'Cloning…' : 'Clone next month'}</button>}
-          {tab === 'allocations' && <button type="button" className="btn btn-primary" onClick={() => setEditing(null)} disabled={!addableClients.length}><Plus size={14}/>Add client workload</button>}
+          {tab === 'allocations' && isLiveMonth && <button type="button" className="btn btn-ghost" onClick={cloneMonth} disabled={cloning || !selectedMonth}><Copy size={14}/>{cloning ? 'Starting…' : 'Start next month'}</button>}
         </div>
       </div>
 
       <div className="page-body planning-page">
         {error && <div className="planning-error"><AlertTriangle size={15}/>{error}</div>}
+        {syncMessage && <div className="planning-sync-success"><CheckCircle2 size={15}/><span>{syncMessage}</span></div>}
         <div className="planning-tabs" role="tablist" aria-label="Design and CS views">
           <button type="button" className={tab === 'workload' ? 'active' : ''} onClick={() => setTab('workload')}><Activity size={14}/>Workload</button>
           <button type="button" className={tab === 'allocations' ? 'active' : ''} onClick={() => setTab('allocations')}><LayoutDashboard size={14}/>Client allocations</button>
@@ -437,25 +568,33 @@ export default function DesignCSOverview() {
 
         {tab === 'workload' && (
           <>
+            {isLiveMonth && <div className="planning-roster-source"><CheckCircle2 size={15}/><span><strong>Live from Client Roster.</strong> Drag any client row onto another person in the same role to reassign it everywhere and recalculate workload immediately.</span></div>}
+            {!isLiveMonth && <div className="planning-history-source"><Copy size={15}/><span><strong>Historical snapshot.</strong> Select the latest month to edit roster assignments or use drag and drop.</span></div>}
             {workloads.unmatchedKeys.length > 0 && <div className="planning-notice"><AlertTriangle size={15}/><span><strong>{workloads.unmatchedKeys.length} legacy team record{workloads.unmatchedKeys.length === 1 ? '' : 's'} need matching.</strong> Their historical work is preserved, but they are not counted as active Company Command headcount.</span></div>}
-            <WorkloadSection title="Creative strategists" subtitle={`Healthy range: ${data.settings.cs_min_concepts}–${data.settings.cs_max_concepts} concepts per month. Client count remains visible as context.`} people={workloads.strategists} type="creative_strategist"/>
-            <WorkloadSection title="Video editors" subtitle={`${data.settings.editor_daily_capacity} video concepts per working day · ${selectedMonthRecord?.working_days || 22} working days.`} people={workloads.editors} type="editor"/>
-            <WorkloadSection title="Designers" subtitle={`${data.settings.designer_daily_capacity} static concepts per working day · two more concepts than editors.`} people={workloads.designers} type="designer"/>
-            <WorkloadSection title="UGC managers" subtitle={`${data.settings.ugc_max_clients} active clients per UGC manager.`} people={workloads.ugcManagers} type="ugc_manager"/>
+            <WorkloadSection title="Creative strategists" subtitle={`Healthy range: ${data.settings.cs_min_concepts}–${data.settings.cs_max_concepts} concepts per month. Client count remains visible as context.`} people={workloads.strategists} allocations={monthAllocations} type="creative_strategist" draggedRole={draggedAllocation?.type} onDropClient={moveClient} onDragStart={isLiveMonth ? startClientDrag : undefined} onDragEnd={() => setDraggedAllocation(null)}/>
+            <WorkloadSection title="Video editors" subtitle={`${data.settings.editor_daily_capacity} video concepts per working day · ${selectedMonthRecord?.working_days || 22} working days.`} people={workloads.editors} allocations={monthAllocations} type="editor" draggedRole={draggedAllocation?.type} onDropClient={moveClient} onDragStart={isLiveMonth ? startClientDrag : undefined} onDragEnd={() => setDraggedAllocation(null)}/>
+            <WorkloadSection title="Designers" subtitle={`${data.settings.designer_daily_capacity} static concepts per working day · two more concepts than editors.`} people={workloads.designers} allocations={monthAllocations} type="designer" draggedRole={draggedAllocation?.type} onDropClient={moveClient} onDragStart={isLiveMonth ? startClientDrag : undefined} onDragEnd={() => setDraggedAllocation(null)}/>
+            <WorkloadSection title="UGC managers" subtitle={`${data.settings.ugc_max_clients} active clients per UGC manager.`} people={workloads.ugcManagers} allocations={monthAllocations} type="ugc_manager" draggedRole={draggedAllocation?.type} onDropClient={moveClient} onDragStart={isLiveMonth ? startClientDrag : undefined} onDragEnd={() => setDraggedAllocation(null)}/>
           </>
         )}
 
-        {tab === 'allocations' && <AllocationTable allocations={monthAllocations} peopleByKey={peopleByKey} onEdit={item => setEditing(item)} onDelete={deleteAllocation}/>}
+        {tab === 'allocations' && (
+          <>
+            {isLiveMonth
+              ? <div className="planning-roster-source"><CheckCircle2 size={15}/><span><strong>Client Roster is the source of truth.</strong> Changes here update the same client records used by the roster, org chart, spend tracker, and workload view.</span></div>
+              : <div className="planning-history-source"><Copy size={15}/><span><strong>Read-only historical snapshot.</strong> This imported data is preserved and cannot overwrite today’s Client Roster.</span></div>}
+            <AllocationTable allocations={monthAllocations} peopleByKey={peopleByKey} onEdit={item => setEditing(item)} isLive={isLiveMonth}/>
+          </>
+        )}
         {tab === 'org' && <OrgChart profiles={data?.profiles || []} clients={data?.clients || []}/>}
       </div>
 
-      {editing !== undefined && (
+      {editing !== undefined && isLiveMonth && (
         <AllocationModal
           allocation={editing}
           monthStart={selectedMonth}
-          clients={editing ? data.clients : addableClients}
+          clients={data.clients}
           people={data.people}
-          userId={user.id}
           onClose={() => setEditing(undefined)}
           onSaved={() => load(true)}
         />

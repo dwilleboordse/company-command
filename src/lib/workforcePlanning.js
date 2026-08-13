@@ -33,6 +33,57 @@ export function parseIds(value) {
   try { return JSON.parse(value) } catch { return [] }
 }
 
+function conceptCount(client, type) {
+  return Math.max(0, Number(client?.creatives?.[type]?.concepts || 0))
+}
+
+export function buildRosterAllocations({ clients = [], people = [], monthStart = '' }) {
+  const peopleByProfileAndRole = new Map(
+    people
+      .filter(person => person.profile_id)
+      .map(person => [`${person.profile_id}:${person.discipline}`, person]),
+  )
+  const keysFor = (value, role) => parseIds(value)
+    .map(id => peopleByProfileAndRole.get(`${id}:${role}`)?.source_key)
+    .filter(Boolean)
+
+  return clients
+    .filter(client => client.is_active !== false && !client.is_archived)
+    .map(client => {
+      const strategistProfileIds = parseIds(client.cs_ids)
+      const designerProfileIds = parseIds(client.designer_ids)
+      const editorProfileIds = parseIds(client.editor_ids)
+      const ugcManagerProfileIds = parseIds(client.ugc_ids)
+      const strategistKeys = keysFor(strategistProfileIds, 'creative_strategist')
+      const videoConcepts = conceptCount(client, 'video')
+      const ugcConcepts = conceptCount(client, 'ugc')
+      return {
+        id: `roster:${client.id}`,
+        month_start: monthStart,
+        source_key: `roster:${client.id}`,
+        client_id: client.id,
+        client_name_snapshot: client.name,
+        strategist_key: strategistKeys[0] || null,
+        strategist_keys: strategistKeys,
+        strategist_profile_ids: strategistProfileIds,
+        statics: conceptCount(client, 'static'),
+        videos: videoConcepts + ugcConcepts,
+        video_concepts: videoConcepts,
+        ugc_concepts: ugcConcepts,
+        designer_keys: keysFor(designerProfileIds, 'designer'),
+        designer_profile_ids: designerProfileIds,
+        editor_keys: keysFor(editorProfileIds, 'editor'),
+        editor_profile_ids: editorProfileIds,
+        ugc_manager_keys: keysFor(ugcManagerProfileIds, 'ugc_manager'),
+        ugc_manager_profile_ids: ugcManagerProfileIds,
+        ugc_enabled: ugcManagerProfileIds.length > 0,
+        notes: '',
+        is_live_roster: true,
+      }
+    })
+    .sort((a, b) => a.client_name_snapshot.localeCompare(b.client_name_snapshot))
+}
+
 export function statusMeta(status) {
   if (status === 'overloaded') return { label: 'Over capacity', tone: 'red' }
   if (status === 'near_capacity') return { label: 'Near capacity', tone: 'amber' }
@@ -47,13 +98,38 @@ function standardStatus(utilization) {
   return 'available'
 }
 
+function assignmentKeys(item, field, fallbackField) {
+  const keys = item[field] || []
+  if (keys.length) return keys
+  return item[fallbackField] ? [item[fallbackField]] : []
+}
+
+function sharedAssignments(allocations, personKey, field, conceptField) {
+  return allocations.flatMap(item => {
+    const keys = assignmentKeys(item, field, field === 'strategist_keys' ? 'strategist_key' : '')
+    if (!keys.includes(personKey)) return []
+    const divisor = Math.max(keys.length, 1)
+    const sharedValue = Number(item[conceptField] || 0) / divisor
+    return [{ ...item, [conceptField]: Math.round(sharedValue * 10) / 10 }]
+  })
+}
+
 export function buildWorkloads({ allocations = [], people = [], settings = DEFAULT_CAPACITY, workingDays = 22 }) {
   const safeSettings = { ...DEFAULT_CAPACITY, ...(settings || {}) }
   const byKey = new Map(people.map(person => [person.source_key, person]))
   const activePeople = people.filter(person => person.is_active !== false)
 
   const strategists = activePeople.filter(person => person.discipline === 'creative_strategist').map(person => {
-    const owned = allocations.filter(item => item.strategist_key === person.source_key)
+    const owned = allocations.flatMap(item => {
+      const keys = assignmentKeys(item, 'strategist_keys', 'strategist_key')
+      if (!keys.includes(person.source_key)) return []
+      const divisor = Math.max(keys.length, 1)
+      return [{
+        ...item,
+        statics: Math.round((Number(item.statics || 0) / divisor) * 10) / 10,
+        videos: Math.round((Number(item.videos || 0) / divisor) * 10) / 10,
+      }]
+    })
     const clients = owned.length
     const concepts = owned.reduce((sum, item) => sum + Number(item.statics || 0) + Number(item.videos || 0), 0)
     const utilization = safeSettings.cs_max_concepts ? Math.round((concepts / safeSettings.cs_max_concepts) * 100) : 0
@@ -74,7 +150,7 @@ export function buildWorkloads({ allocations = [], people = [], settings = DEFAU
   })
 
   const editors = activePeople.filter(person => person.discipline === 'editor').map(person => {
-    const assigned = allocations.filter(item => (item.editor_keys || []).includes(person.source_key))
+    const assigned = sharedAssignments(allocations, person.source_key, 'editor_keys', 'videos')
     const videos = assigned.reduce((sum, item) => sum + Number(item.videos || 0), 0)
     const dailyCapacity = Number(person.daily_capacity || safeSettings.editor_daily_capacity)
     const capacity = dailyCapacity * workingDays
@@ -92,7 +168,7 @@ export function buildWorkloads({ allocations = [], people = [], settings = DEFAU
   })
 
   const designers = activePeople.filter(person => person.discipline === 'designer').map(person => {
-    const assigned = allocations.filter(item => (item.designer_keys || []).includes(person.source_key))
+    const assigned = sharedAssignments(allocations, person.source_key, 'designer_keys', 'statics')
     const statics = assigned.reduce((sum, item) => sum + Number(item.statics || 0), 0)
     const dailyCapacity = Number(person.daily_capacity || safeSettings.designer_daily_capacity)
     const capacity = dailyCapacity * workingDays
@@ -126,7 +202,9 @@ export function buildWorkloads({ allocations = [], people = [], settings = DEFAU
 
   const unmatchedKeys = new Set()
   allocations.forEach(item => {
-    if (item.strategist_key && !byKey.get(item.strategist_key)?.profile_id) unmatchedKeys.add(item.strategist_key)
+    assignmentKeys(item, 'strategist_keys', 'strategist_key').forEach(key => {
+      if (key && !byKey.get(key)?.profile_id) unmatchedKeys.add(key)
+    })
     ;[...(item.editor_keys || []), ...(item.designer_keys || []), ...(item.ugc_manager_keys || [])].forEach(key => {
       if (key && !byKey.get(key)?.profile_id) unmatchedKeys.add(key)
     })

@@ -18,7 +18,17 @@ export async function loadDesignCsData() {
   if (firstError) throw firstError
 
   const profiles = profileResult.data || []
-  const people = [...(peopleResult.data || [])]
+  const profilesById = new Map(profiles.map(profile => [profile.id, profile]))
+  const people = (peopleResult.data || []).map(person => {
+    const profile = person.profile_id ? profilesById.get(person.profile_id) : null
+    if (!profile || !PLANNING_POSITIONS.has(profile.position)) return { ...person, is_active: false }
+    return {
+      ...person,
+      display_name: profile.full_name,
+      discipline: profile.position,
+      is_active: true,
+    }
+  })
   const mappedProfileIds = new Set(people.filter(person => person.profile_id).map(person => person.profile_id))
 
   profiles.filter(profile => PLANNING_POSITIONS.has(profile.position) && !mappedProfileIds.has(profile.id)).forEach(profile => {
