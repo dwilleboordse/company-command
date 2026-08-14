@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, AlertTriangle, BriefcaseBusiness, CheckCircle2, ChevronRight, Copy, GripVertical, LayoutDashboard, Network, Pencil, Plus, Users, X } from 'lucide-react'
+import { Activity, AlertTriangle, BriefcaseBusiness, CheckCircle2, ChevronRight, Copy, GripVertical, LayoutDashboard, LockKeyhole, Network, Pencil, Plus, Users, X } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { loadDesignCsData, persistVirtualPeople } from '../lib/designCsData'
-import { buildRosterAllocations, buildWorkloads, formatMonth, initials, nextMonthStart, parseIds, roleLabel, statusMeta } from '../lib/workforcePlanning'
+import { buildAllocationSnapshot, buildRosterAllocations, buildWorkloads, formatMonth, initials, nextMonthStart, parseIds, roleLabel, statusMeta } from '../lib/workforcePlanning'
 import './WorkforcePlanning.css'
 
 const WORKLOAD_DRAG_MIME = 'application/x-company-command-client'
@@ -441,7 +441,7 @@ function OrgChart({ profiles, clients }) {
 }
 
 export default function DesignCSOverview() {
-  const { user, isCEO, isOps } = useAuth()
+  const { isCEO, isOps } = useAuth()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -489,49 +489,38 @@ export default function DesignCSOverview() {
     workingDays: selectedMonthRecord?.working_days || 22,
   }), [monthAllocations, data?.people, data?.settings, selectedMonthRecord?.working_days])
 
-  async function cloneMonth() {
-    if (!selectedMonthRecord || cloning) return
+  async function closeMonthAndStartNext() {
+    if (!selectedMonthRecord || !isLiveMonth || cloning) return
     const newMonth = nextMonthStart(selectedMonth)
     if (data.months.some(month => month.month_start === newMonth)) {
       setSelectedMonth(newMonth)
       return
     }
+    const closingLabel = formatMonth(selectedMonth)
+    const newLabel = formatMonth(newMonth)
+    const confirmed = window.confirm(
+      `Close ${closingLabel} and start ${newLabel}?\n\n${closingLabel} will be frozen as a read-only snapshot. ${newLabel} will remain live from Client Roster.`,
+    )
+    if (!confirmed) return
     setCloning(true)
     setError('')
+    setSyncMessage('')
     try {
-      const { error: monthError } = await supabase.from('design_cs_months').insert({
-        month_start: newMonth,
-        label: formatMonth(newMonth),
-        working_days: selectedMonthRecord.working_days,
-        source: 'company_command',
-        updated_by: user.id,
+      await persistVirtualPeople(data.people)
+      const snapshot = buildAllocationSnapshot(monthAllocations)
+      const { data: result, error: rolloverError } = await supabase.rpc('close_design_cs_month', {
+        p_current_month: selectedMonth,
+        p_new_month: newMonth,
+        p_new_label: newLabel,
+        p_working_days: selectedMonthRecord.working_days,
+        p_allocations: snapshot,
       })
-      if (monthError) throw monthError
-      if (monthAllocations.length) {
-        await persistVirtualPeople(data.people)
-        const copies = monthAllocations.map(item => ({
-          month_start: newMonth,
-          source_key: item.source_key,
-          client_id: item.client_id,
-          client_name_snapshot: item.client_name_snapshot,
-          strategist_key: item.strategist_key,
-          strategist_keys: item.strategist_keys?.length ? item.strategist_keys : item.strategist_key ? [item.strategist_key] : [],
-          statics: item.statics,
-          videos: item.videos,
-          designer_keys: item.designer_keys,
-          editor_keys: item.editor_keys,
-          ugc_manager_keys: item.ugc_manager_keys,
-          ugc_enabled: item.ugc_enabled,
-          notes: item.notes,
-          updated_by: user.id,
-        }))
-        const { error: allocationError } = await supabase.from('design_cs_allocations').insert(copies)
-        if (allocationError) throw allocationError
-      }
+      if (rolloverError) throw rolloverError
       await load(false)
       setSelectedMonth(newMonth)
-    } catch (cloneError) {
-      setError(cloneError.message || 'Unable to clone this month.')
+      setSyncMessage(`${closingLabel} is now read-only with ${result?.snapshot_count ?? snapshot.length} client allocations. ${newLabel} is live from Client Roster.`)
+    } catch (rolloverError) {
+      setError(rolloverError.message || `Unable to close ${closingLabel}. No month changes were saved.`)
     } finally {
       setCloning(false)
     }
@@ -627,7 +616,7 @@ export default function DesignCSOverview() {
         <div className="planning-header-actions">
           {tab !== 'org' && <select aria-label="Month" value={selectedMonth} onChange={event => setSelectedMonth(event.target.value)}>{data?.months.map(month => <option key={month.month_start} value={month.month_start}>{month.label}</option>)}</select>}
           {tab === 'allocations' && isLiveMonth && <button type="button" className="btn btn-primary" onClick={() => setEditing(null)}><Plus size={14}/>Add client</button>}
-          {tab === 'allocations' && isLiveMonth && <button type="button" className="btn btn-ghost" onClick={cloneMonth} disabled={cloning || !selectedMonth}><Copy size={14}/>{cloning ? 'Starting…' : 'Start next month'}</button>}
+          {tab === 'allocations' && isLiveMonth && <button type="button" className="btn btn-ghost" onClick={closeMonthAndStartNext} disabled={cloning || !selectedMonth}><LockKeyhole size={14}/>{cloning ? 'Closing month…' : `Close ${formatMonth(selectedMonth)} & start ${formatMonth(nextMonthStart(selectedMonth))}`}</button>}
         </div>
       </div>
 
@@ -664,7 +653,7 @@ export default function DesignCSOverview() {
         {tab === 'allocations' && (
           <>
             {isLiveMonth
-              ? <div className="planning-roster-source"><CheckCircle2 size={15}/><span><strong>Client Roster is the source of truth.</strong> Changes here update the same client records used by the roster, org chart, spend tracker, and workload view.</span></div>
+              ? <div className="planning-roster-source"><CheckCircle2 size={15}/><span><strong>Client Roster is the source of truth.</strong> Close this month to freeze the exact allocation below as read-only, then continue live in the next month.</span></div>
               : <div className="planning-history-source"><Copy size={15}/><span><strong>Read-only historical snapshot.</strong> This imported data is preserved and cannot overwrite today’s Client Roster.</span></div>}
             <AllocationTable allocations={monthAllocations} peopleByKey={peopleByKey} onEdit={item => setEditing(item)} isLive={isLiveMonth}/>
           </>

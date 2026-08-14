@@ -84,6 +84,25 @@ export function buildRosterAllocations({ clients = [], people = [], monthStart =
     .sort((a, b) => a.client_name_snapshot.localeCompare(b.client_name_snapshot))
 }
 
+export function buildAllocationSnapshot(allocations = []) {
+  return allocations.map(item => ({
+    source_key: item.source_key,
+    client_id: item.client_id || null,
+    client_name_snapshot: item.client_name_snapshot,
+    strategist_key: item.strategist_key || null,
+    strategist_keys: item.strategist_keys?.length
+      ? item.strategist_keys
+      : item.strategist_key ? [item.strategist_key] : [],
+    statics: Number(item.statics || 0),
+    videos: Number(item.videos || 0),
+    designer_keys: item.designer_keys || [],
+    editor_keys: item.editor_keys || [],
+    ugc_manager_keys: item.ugc_manager_keys || [],
+    ugc_enabled: Boolean(item.ugc_enabled),
+    notes: item.notes || '',
+  }))
+}
+
 export function statusMeta(status) {
   if (status === 'overloaded') return { label: 'Over capacity', tone: 'red' }
   if (status === 'near_capacity') return { label: 'Near capacity', tone: 'amber' }

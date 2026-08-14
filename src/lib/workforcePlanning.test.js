@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildHiringSignals, buildRosterAllocations, buildWorkloads, DEFAULT_CAPACITY, projectGrowthScenario } from './workforcePlanning.js'
+import { buildAllocationSnapshot, buildHiringSignals, buildRosterAllocations, buildWorkloads, DEFAULT_CAPACITY, projectGrowthScenario } from './workforcePlanning.js'
 
 const people = [
   { source_key: 'cs-1', display_name: 'CS One', discipline: 'creative_strategist', is_active: true },
@@ -152,4 +152,38 @@ test('shared roster assignments split capacity instead of double-counting concep
   assert.equal(result.strategists[1].concepts, 20)
   assert.equal(result.editors[0].videos, 15)
   assert.equal(result.editors[1].videos, 15)
+})
+
+test('month close snapshot preserves the live roster allocation without carrying a new month', () => {
+  const snapshot = buildAllocationSnapshot([{
+    source_key: 'roster:client-1',
+    client_id: 'client-1',
+    client_name_snapshot: 'Snapshot Client',
+    strategist_key: 'cs-1',
+    strategist_keys: ['cs-1', 'cs-2'],
+    statics: 12,
+    videos: 18,
+    designer_keys: ['designer-1'],
+    editor_keys: ['editor-1'],
+    ugc_manager_keys: ['ugc-1'],
+    ugc_enabled: true,
+    notes: 'Frozen at month close',
+    month_start: '2026-08-01',
+    is_live_roster: true,
+  }])
+
+  assert.deepEqual(snapshot, [{
+    source_key: 'roster:client-1',
+    client_id: 'client-1',
+    client_name_snapshot: 'Snapshot Client',
+    strategist_key: 'cs-1',
+    strategist_keys: ['cs-1', 'cs-2'],
+    statics: 12,
+    videos: 18,
+    designer_keys: ['designer-1'],
+    editor_keys: ['editor-1'],
+    ugc_manager_keys: ['ugc-1'],
+    ugc_enabled: true,
+    notes: 'Frozen at month close',
+  }])
 })
