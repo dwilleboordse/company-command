@@ -1,24 +1,38 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Activity, AlertTriangle, BriefcaseBusiness, CheckCircle2, ChevronRight, Copy, GripVertical, LayoutDashboard, Network, Pencil, Users, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Activity, AlertTriangle, BriefcaseBusiness, CheckCircle2, ChevronRight, Copy, GripVertical, LayoutDashboard, Network, Pencil, Plus, Users, X } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { loadDesignCsData, persistVirtualPeople } from '../lib/designCsData'
 import { buildRosterAllocations, buildWorkloads, formatMonth, initials, nextMonthStart, parseIds, roleLabel, statusMeta } from '../lib/workforcePlanning'
 import './WorkforcePlanning.css'
 
-const EMPTY_FORM = {
-  client_id: '',
-  strategist_profile_ids: [],
-  statics: 0,
-  video_concepts: 0,
-  ugc_concepts: 0,
-  designer_profile_ids: [],
-  editor_profile_ids: [],
-  ugc_manager_profile_ids: [],
+const WORKLOAD_DRAG_MIME = 'application/x-company-command-client'
+
+function createEmptyAllocationForm() {
+  return {
+    client_id: '',
+    client_name: '',
+    strategist_profile_ids: [],
+    statics: 0,
+    video_concepts: 0,
+    ugc_concepts: 0,
+    designer_profile_ids: [],
+    editor_profile_ids: [],
+    ugc_manager_profile_ids: [],
+  }
 }
 
 function formatConcepts(value) {
   return Number.isInteger(Number(value)) ? Number(value) : Number(value).toFixed(1)
+}
+
+function buildCreativeAllocation(current, concepts, isEdit) {
+  const count = Number(concepts || 0)
+  return {
+    ...(current || {}),
+    concepts: count,
+    variations: isEdit ? Number(current?.variations || 0) : count > 0 ? 1 : 0,
+  }
 }
 
 function CapacityBar({ utilization, status }) {
@@ -30,7 +44,7 @@ function CapacityBar({ utilization, status }) {
   )
 }
 
-function WorkloadClientBreakdown({ assignments, showConcepts, type, canDrag, onDragStart, onDragEnd }) {
+function WorkloadClientBreakdown({ assignments, showConcepts, type, canDrag, onSelect, onDragStart, onDragEnd }) {
   const sortedAssignments = [...assignments].sort((a, b) => a.client_name_snapshot.localeCompare(b.client_name_snapshot))
 
   if (!sortedAssignments.length) return <div className="workload-client-empty">No clients assigned</div>
@@ -47,15 +61,28 @@ function WorkloadClientBreakdown({ assignments, showConcepts, type, canDrag, onD
         </thead>
         <tbody>
           {sortedAssignments.map(item => (
-            <tr
-              key={item.id}
-              draggable={canDrag && Boolean(item.client_id)}
-              className={canDrag && item.client_id ? 'workload-client-draggable' : ''}
-              onDragStart={event => onDragStart?.(event, item, type)}
-              onDragEnd={onDragEnd}
-            >
+            <tr key={item.id}>
               <td title={item.client_name_snapshot}>
-                <span className="workload-client-name">{canDrag && item.client_id && <GripVertical size={11}/>} {item.client_name_snapshot}</span>
+                {canDrag && item.client_id ? (
+                  <button
+                    type="button"
+                    className="workload-client-name workload-client-drag-handle"
+                    draggable
+                    title={`Drag or select ${item.client_name_snapshot} to reassign it`}
+                    onPointerDown={event => {
+                      if (event.pointerType !== 'mouse') onSelect?.(item, type)
+                    }}
+                    onClick={() => onSelect?.(item, type)}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter' || event.key === ' ') onSelect?.(item, type)
+                    }}
+                    onDragStart={event => onDragStart?.(event, item, type)}
+                    onDragEnd={onDragEnd}
+                  >
+                    <GripVertical size={11}/>
+                    <span>{item.client_name_snapshot}</span>
+                  </button>
+                ) : <span className="workload-client-name">{item.client_name_snapshot}</span>}
               </td>
               {showConcepts && <td><strong>{formatConcepts(item.statics || 0)}</strong></td>}
               {showConcepts && <td><strong>{formatConcepts(item.videos || 0)}</strong></td>}
@@ -67,17 +94,21 @@ function WorkloadClientBreakdown({ assignments, showConcepts, type, canDrag, onD
   )
 }
 
-function WorkloadCard({ person, type, canDrop, onDropClient, onDragStart, onDragEnd }) {
+function WorkloadCard({ person, type, canAcceptDrop, isDropReady, onDropClient, onSelect, onDragStart, onDragEnd }) {
   const meta = statusMeta(person.status)
   const showConcepts = ['creative_strategist', 'editor', 'designer'].includes(type)
   return (
     <article
-      className={`workload-card ${canDrop ? 'drop-ready' : ''}`}
-      onDragOver={event => canDrop && event.preventDefault()}
-      onDrop={event => {
-        if (!canDrop) return
+      className={`workload-card ${isDropReady ? 'drop-ready' : ''}`}
+      onDragOver={event => {
+        if (!canAcceptDrop) return
         event.preventDefault()
-        onDropClient(person, type)
+        event.dataTransfer.dropEffect = 'move'
+      }}
+      onDrop={event => {
+        if (!canAcceptDrop) return
+        event.preventDefault()
+        onDropClient(event, person, type)
       }}
     >
       <div className="workload-card-top">
@@ -98,12 +129,13 @@ function WorkloadCard({ person, type, canDrop, onDropClient, onDragStart, onDrag
           <span>{person.videos} video concepts</span>
         </div>
       )}
-      {canDrop && <div className="workload-drop-hint">Drop to assign here</div>}
+      {isDropReady && <button type="button" className="workload-drop-hint" onClick={event => onDropClient(event, person, type)}>Drop or click to assign here</button>}
       <WorkloadClientBreakdown
         assignments={person.assignments}
         showConcepts={showConcepts}
         type={type}
         canDrag={Boolean(onDragStart)}
+        onSelect={onSelect}
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
       />
@@ -111,7 +143,7 @@ function WorkloadCard({ person, type, canDrop, onDropClient, onDragStart, onDrag
   )
 }
 
-function UnassignedWorkloads({ allocations, type, onDragStart, onDragEnd }) {
+function UnassignedWorkloads({ allocations, type, onSelect, onDragStart, onDragEnd }) {
   if (!allocations.length) return null
   return (
     <div className="workload-unassigned">
@@ -122,6 +154,10 @@ function UnassignedWorkloads({ allocations, type, onDragStart, onDragEnd }) {
             type="button"
             key={item.id}
             draggable
+            onPointerDown={event => {
+              if (event.pointerType !== 'mouse') onSelect(item, type)
+            }}
+            onClick={() => onSelect(item, type)}
             onDragStart={event => onDragStart(event, item, type)}
             onDragEnd={onDragEnd}
           >
@@ -135,7 +171,7 @@ function UnassignedWorkloads({ allocations, type, onDragStart, onDragEnd }) {
   )
 }
 
-function WorkloadSection({ title, subtitle, people, allocations, type, draggedRole, onDropClient, onDragStart, onDragEnd }) {
+function WorkloadSection({ title, subtitle, people, allocations, type, draggedRole, onDropClient, onSelect, onDragStart, onDragEnd }) {
   const sorted = [...people].sort((a, b) => b.utilization - a.utilization || a.display_name.localeCompare(b.display_name))
   const unassigned = onDragStart ? allocations.filter(item => {
     if (type === 'creative_strategist') return !(item.strategist_keys?.length || item.strategist_key)
@@ -152,15 +188,17 @@ function WorkloadSection({ title, subtitle, people, allocations, type, draggedRo
         </div>
         <span>{people.length} people</span>
       </div>
-      <UnassignedWorkloads allocations={unassigned} type={type} onDragStart={onDragStart} onDragEnd={onDragEnd}/>
+      <UnassignedWorkloads allocations={unassigned} type={type} onSelect={onSelect} onDragStart={onDragStart} onDragEnd={onDragEnd}/>
       <div className="workload-grid">
         {sorted.map(person => (
           <WorkloadCard
             key={person.source_key}
             person={person}
             type={type}
-            canDrop={draggedRole === type && Boolean(person.profile_id)}
+            canAcceptDrop={Boolean(onDragStart) && Boolean(person.profile_id)}
+            isDropReady={draggedRole === type && Boolean(person.profile_id)}
             onDropClient={onDropClient}
+            onSelect={onSelect}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
           />
@@ -195,8 +233,10 @@ function MultiChecks({ label, options, value, onChange }) {
 }
 
 function AllocationModal({ allocation, monthStart, clients, people, onClose, onSaved }) {
+  const isEdit = Boolean(allocation)
   const [form, setForm] = useState(allocation ? {
     client_id: allocation.client_id || '',
+    client_name: allocation.client_name_snapshot || '',
     strategist_profile_ids: allocation.strategist_profile_ids || [],
     statics: allocation.statics || 0,
     video_concepts: allocation.video_concepts || 0,
@@ -204,7 +244,7 @@ function AllocationModal({ allocation, monthStart, clients, people, onClose, onS
     designer_profile_ids: allocation.designer_profile_ids || [],
     editor_profile_ids: allocation.editor_profile_ids || [],
     ugc_manager_profile_ids: allocation.ugc_manager_profile_ids || [],
-  } : EMPTY_FORM)
+  } : createEmptyAllocationForm())
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -212,8 +252,17 @@ function AllocationModal({ allocation, monthStart, clients, people, onClose, onS
 
   async function save(event) {
     event.preventDefault()
-    const client = clients.find(item => item.id === form.client_id)
-    if (!client) return
+    const client = isEdit ? clients.find(item => item.id === form.client_id) : null
+    const clientName = form.client_name.trim()
+    if (isEdit && !client) return
+    if (!isEdit && !clientName) {
+      setError('Enter a client name.')
+      return
+    }
+    if (!isEdit && clients.some(item => item.name?.trim().toLowerCase() === clientName.toLowerCase())) {
+      setError('That client already exists in the Client Roster. Edit or reactivate the existing client instead.')
+      return
+    }
     setSaving(true)
     setError('')
     try {
@@ -224,7 +273,7 @@ function AllocationModal({ allocation, monthStart, clients, people, onClose, onS
         ...form.ugc_manager_profile_ids,
       ]
       await persistVirtualPeople(people.filter(person => selectedProfileIds.includes(person.profile_id)))
-      const currentCreatives = client.creatives || {}
+      const currentCreatives = client?.creatives || {}
       const payload = {
         cs_ids: form.strategist_profile_ids,
         assigned_cs_id: form.strategist_profile_ids[0] || null,
@@ -233,20 +282,24 @@ function AllocationModal({ allocation, monthStart, clients, people, onClose, onS
         ugc_ids: form.ugc_manager_profile_ids,
         creatives: {
           ...currentCreatives,
-          static: { ...(currentCreatives.static || {}), concepts: Number(form.statics || 0) },
-          video: { ...(currentCreatives.video || {}), concepts: Number(form.video_concepts || 0) },
-          ugc: { ...(currentCreatives.ugc || {}), concepts: Number(form.ugc_concepts || 0) },
+          static: buildCreativeAllocation(currentCreatives.static, form.statics, isEdit),
+          video: buildCreativeAllocation(currentCreatives.video, form.video_concepts, isEdit),
+          ugc: buildCreativeAllocation(currentCreatives.ugc, form.ugc_concepts, isEdit),
         },
       }
-      const { data: savedClient, error: saveError } = await supabase
-        .from('clients')
-        .update(payload)
-        .eq('id', client.id)
-        .select('id')
-        .single()
+      const saveQuery = isEdit
+        ? supabase.from('clients').update(payload).eq('id', client.id)
+        : supabase.from('clients').insert({
+          ...payload,
+          name: clientName,
+          mb_ids: [],
+          is_active: true,
+          is_archived: false,
+        })
+      const { data: savedClient, error: saveError } = await saveQuery.select('*').single()
       if (saveError) throw saveError
-      if (!savedClient) throw new Error('The Client Roster did not accept this update.')
-      await onSaved()
+      if (!savedClient) throw new Error(`The Client Roster did not accept this ${isEdit ? 'update' : 'new client'}.`)
+      await onSaved({ client: savedClient, isNew: !isEdit })
       onClose()
     } catch (saveError) {
       setError(saveError.message || 'Unable to save this allocation.')
@@ -260,17 +313,20 @@ function AllocationModal({ allocation, monthStart, clients, people, onClose, onS
       <form className="modal planning-modal" role="dialog" aria-modal="true" aria-labelledby="allocation-title" onSubmit={save}>
         <div className="planning-modal-header">
           <div>
-            <h2 id="allocation-title" className="modal-title">Edit client allocation</h2>
-            <p>{formatMonth(monthStart)} · saves to the Client Roster</p>
+            <h2 id="allocation-title" className="modal-title">{isEdit ? 'Edit client allocation' : 'Add client allocation'}</h2>
+            <p>{formatMonth(monthStart)} · {isEdit ? 'saves to' : 'creates a new active client in'} the Client Roster</p>
           </div>
           <button type="button" className="btn btn-ghost btn-icon" onClick={onClose} aria-label="Close"><X size={16}/></button>
         </div>
 
         <label className="field-label">Client</label>
-        <select value={form.client_id} onChange={event => setForm(current => ({ ...current, client_id: event.target.value }))} required disabled={Boolean(allocation?.client_id)}>
-          <option value="">Select an active client…</option>
-          {clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
-        </select>
+        {isEdit ? (
+          <select value={form.client_id} disabled>
+            {clients.filter(client => client.id === form.client_id).map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
+          </select>
+        ) : (
+          <input value={form.client_name} onChange={event => setForm(current => ({ ...current, client_name: event.target.value }))} placeholder="Client name" required autoFocus/>
+        )}
 
         <MultiChecks label="Creative strategists" options={optionsFor('creative_strategist')} value={form.strategist_profile_ids} onChange={strategist_profile_ids => setForm(current => ({ ...current, strategist_profile_ids }))}/>
 
@@ -287,7 +343,7 @@ function AllocationModal({ allocation, monthStart, clients, people, onClose, onS
         {error && <div className="planning-error">{error}</div>}
         <div className="planning-modal-actions">
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn btn-primary" disabled={saving || !form.client_id}>{saving ? 'Saving…' : 'Save to Client Roster'}</button>
+          <button type="submit" className="btn btn-primary" disabled={saving || (isEdit ? !form.client_id : !form.client_name.trim())}>{saving ? 'Saving…' : isEdit ? 'Save to Client Roster' : 'Create in Client Roster'}</button>
         </div>
       </form>
     </div>
@@ -393,7 +449,8 @@ export default function DesignCSOverview() {
   const [tab, setTab] = useState('workload')
   const [editing, setEditing] = useState(undefined)
   const [cloning, setCloning] = useState(false)
-  const [draggedAllocation, setDraggedAllocation] = useState(null)
+  const draggedAllocationRef = useRef(null)
+  const [draggedRole, setDraggedRole] = useState(null)
   const [syncMessage, setSyncMessage] = useState('')
 
   async function load(keepMonth = true) {
@@ -480,27 +537,52 @@ export default function DesignCSOverview() {
     }
   }
 
-  function startClientDrag(event, allocation, type) {
+  function selectClientForMove(allocation, type) {
     if (!isLiveMonth || !allocation.client_id) return
-    event.dataTransfer.effectAllowed = 'move'
-    event.dataTransfer.setData('text/plain', allocation.client_id)
-    setDraggedAllocation({ allocation, type })
+    draggedAllocationRef.current = { allocation, type }
+    setDraggedRole(type)
   }
 
-  async function moveClient(person, type) {
-    if (!draggedAllocation || draggedAllocation.type !== type || !person.profile_id) return
+  function startClientDrag(event, allocation, type) {
+    selectClientForMove(allocation, type)
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData(WORKLOAD_DRAG_MIME, JSON.stringify({ clientId: allocation.client_id, type }))
+    event.dataTransfer.setData('text/plain', allocation.client_id)
+  }
+
+  function endClientDrag() {
+    const endingDrag = draggedAllocationRef.current
+    window.setTimeout(() => {
+      if (draggedAllocationRef.current !== endingDrag) return
+      draggedAllocationRef.current = null
+      setDraggedRole(null)
+    }, 0)
+  }
+
+  async function moveClient(event, person, type) {
+    let transferred = null
+    try {
+      const raw = event?.dataTransfer?.getData(WORKLOAD_DRAG_MIME)
+      if (raw) transferred = JSON.parse(raw)
+    } catch {
+      transferred = null
+    }
+    const selected = draggedAllocationRef.current
+    const selectedType = transferred?.type || selected?.type
+    const clientId = transferred?.clientId || event?.dataTransfer?.getData('text/plain') || selected?.allocation?.client_id
+    if (!clientId || selectedType !== type || !person.profile_id) return
     const rosterField = {
       creative_strategist: 'cs_ids',
       editor: 'editor_ids',
       designer: 'designer_ids',
       ugc_manager: 'ugc_ids',
     }[type]
-    const clientId = draggedAllocation.allocation.client_id
     const client = data.clients.find(item => item.id === clientId)
     if (!client || !rosterField) return
     const nextIds = [person.profile_id]
     const currentIds = parseIds(client[rosterField])
-    setDraggedAllocation(null)
+    draggedAllocationRef.current = null
+    setDraggedRole(null)
     if (currentIds.length === 1 && currentIds[0] === person.profile_id) return
 
     setError('')
@@ -544,6 +626,7 @@ export default function DesignCSOverview() {
         </div>
         <div className="planning-header-actions">
           {tab !== 'org' && <select aria-label="Month" value={selectedMonth} onChange={event => setSelectedMonth(event.target.value)}>{data?.months.map(month => <option key={month.month_start} value={month.month_start}>{month.label}</option>)}</select>}
+          {tab === 'allocations' && isLiveMonth && <button type="button" className="btn btn-primary" onClick={() => setEditing(null)}><Plus size={14}/>Add client</button>}
           {tab === 'allocations' && isLiveMonth && <button type="button" className="btn btn-ghost" onClick={cloneMonth} disabled={cloning || !selectedMonth}><Copy size={14}/>{cloning ? 'Starting…' : 'Start next month'}</button>}
         </div>
       </div>
@@ -571,10 +654,10 @@ export default function DesignCSOverview() {
             {isLiveMonth && <div className="planning-roster-source"><CheckCircle2 size={15}/><span><strong>Live from Client Roster.</strong> Drag any client row onto another person in the same role to reassign it everywhere and recalculate workload immediately.</span></div>}
             {!isLiveMonth && <div className="planning-history-source"><Copy size={15}/><span><strong>Historical snapshot.</strong> Select the latest month to edit roster assignments or use drag and drop.</span></div>}
             {workloads.unmatchedKeys.length > 0 && <div className="planning-notice"><AlertTriangle size={15}/><span><strong>{workloads.unmatchedKeys.length} legacy team record{workloads.unmatchedKeys.length === 1 ? '' : 's'} need matching.</strong> Their historical work is preserved, but they are not counted as active Company Command headcount.</span></div>}
-            <WorkloadSection title="Creative strategists" subtitle={`Healthy range: ${data.settings.cs_min_concepts}–${data.settings.cs_max_concepts} concepts per month. Client count remains visible as context.`} people={workloads.strategists} allocations={monthAllocations} type="creative_strategist" draggedRole={draggedAllocation?.type} onDropClient={moveClient} onDragStart={isLiveMonth ? startClientDrag : undefined} onDragEnd={() => setDraggedAllocation(null)}/>
-            <WorkloadSection title="Video editors" subtitle={`${data.settings.editor_daily_capacity} video concepts per working day · ${selectedMonthRecord?.working_days || 22} working days.`} people={workloads.editors} allocations={monthAllocations} type="editor" draggedRole={draggedAllocation?.type} onDropClient={moveClient} onDragStart={isLiveMonth ? startClientDrag : undefined} onDragEnd={() => setDraggedAllocation(null)}/>
-            <WorkloadSection title="Designers" subtitle={`${data.settings.designer_daily_capacity} static concepts per working day · two more concepts than editors.`} people={workloads.designers} allocations={monthAllocations} type="designer" draggedRole={draggedAllocation?.type} onDropClient={moveClient} onDragStart={isLiveMonth ? startClientDrag : undefined} onDragEnd={() => setDraggedAllocation(null)}/>
-            <WorkloadSection title="UGC managers" subtitle={`${data.settings.ugc_max_clients} active clients per UGC manager.`} people={workloads.ugcManagers} allocations={monthAllocations} type="ugc_manager" draggedRole={draggedAllocation?.type} onDropClient={moveClient} onDragStart={isLiveMonth ? startClientDrag : undefined} onDragEnd={() => setDraggedAllocation(null)}/>
+            <WorkloadSection title="Creative strategists" subtitle={`Healthy range: ${data.settings.cs_min_concepts}–${data.settings.cs_max_concepts} concepts per month. Client count remains visible as context.`} people={workloads.strategists} allocations={monthAllocations} type="creative_strategist" draggedRole={draggedRole} onDropClient={moveClient} onSelect={selectClientForMove} onDragStart={isLiveMonth ? startClientDrag : undefined} onDragEnd={endClientDrag}/>
+            <WorkloadSection title="Video editors" subtitle={`${data.settings.editor_daily_capacity} video concepts per working day · ${selectedMonthRecord?.working_days || 22} working days.`} people={workloads.editors} allocations={monthAllocations} type="editor" draggedRole={draggedRole} onDropClient={moveClient} onSelect={selectClientForMove} onDragStart={isLiveMonth ? startClientDrag : undefined} onDragEnd={endClientDrag}/>
+            <WorkloadSection title="Designers" subtitle={`${data.settings.designer_daily_capacity} static concepts per working day · two more concepts than editors.`} people={workloads.designers} allocations={monthAllocations} type="designer" draggedRole={draggedRole} onDropClient={moveClient} onSelect={selectClientForMove} onDragStart={isLiveMonth ? startClientDrag : undefined} onDragEnd={endClientDrag}/>
+            <WorkloadSection title="UGC managers" subtitle={`${data.settings.ugc_max_clients} active clients per UGC manager.`} people={workloads.ugcManagers} allocations={monthAllocations} type="ugc_manager" draggedRole={draggedRole} onDropClient={moveClient} onSelect={selectClientForMove} onDragStart={isLiveMonth ? startClientDrag : undefined} onDragEnd={endClientDrag}/>
           </>
         )}
 
@@ -596,7 +679,12 @@ export default function DesignCSOverview() {
           clients={data.clients}
           people={data.people}
           onClose={() => setEditing(undefined)}
-          onSaved={() => load(true)}
+          onSaved={async ({ client, isNew }) => {
+            await load(true)
+            setSyncMessage(isNew
+              ? `${client.name} was created in Client Roster and is now available everywhere.`
+              : `${client.name} was updated in Client Roster and workload has been recalculated.`)
+          }}
         />
       )}
     </>

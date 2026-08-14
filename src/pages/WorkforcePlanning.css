@@ -92,6 +92,7 @@
 
 .workload-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .workload-card {
+  position: relative;
   min-width: 0;
   padding: 14px;
   background: var(--bg-card);
@@ -145,11 +146,12 @@
 .workload-client-table td strong { font: 700 9px var(--font-mono); }
 .workload-client-table tr:last-child td { border-bottom: 0; }
 .workload-client-table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--bg) 55%, transparent); }
-.workload-client-draggable { cursor: grab; }
-.workload-client-draggable:active { cursor: grabbing; opacity: .65; }
 .workload-client-name { display: inline-flex; align-items: center; gap: 2px; }
+.workload-client-drag-handle { max-width: 100%; padding: 0; border: 0; background: transparent; color: inherit; cursor: grab; font: inherit; text-align: left; touch-action: none; }
+.workload-client-drag-handle:active { cursor: grabbing; opacity: .65; }
+.workload-client-drag-handle span { overflow: hidden; text-overflow: ellipsis; }
 .workload-client-name svg { flex: 0 0 auto; color: var(--text-muted); }
-.workload-drop-hint { margin-top: 10px; padding: 6px 8px; border: 1px dashed var(--accent); border-radius: var(--radius); background: var(--accent-dim); color: var(--accent); font: 700 8px var(--font-mono); letter-spacing: .6px; text-align: center; text-transform: uppercase; }
+.workload-drop-hint { position: absolute; inset: 0; z-index: 3; width: 100%; padding: 6px 8px; border: 1px dashed var(--accent); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--accent-dim) 88%, transparent); color: var(--accent); cursor: pointer; font: 700 9px var(--font-mono); letter-spacing: .6px; text-align: center; text-transform: uppercase; }
 .workload-unassigned { margin-bottom: 10px; padding: 9px 10px; border: 1px dashed rgba(217,119,6,.45); border-radius: var(--radius-lg); background: var(--amber-dim); }
 .workload-unassigned > div:first-child { display: flex; align-items: center; gap: 6px; color: var(--amber); font-size: 9px; }
 .workload-unassigned > div:first-child span { color: var(--text-muted); }
