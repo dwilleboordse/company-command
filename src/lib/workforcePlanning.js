@@ -349,9 +349,10 @@ export function projectGrowthScenario({
 }
 
 export function nextMonthStart(monthStart) {
-  const date = new Date(`${monthStart}T00:00:00`)
-  date.setUTCMonth(date.getUTCMonth() + 1)
-  return date.toISOString().slice(0, 7) + '-01'
+  const [year, month] = monthStart.slice(0, 7).split('-').map(Number)
+  const nextYear = month === 12 ? year + 1 : year
+  const nextMonth = month === 12 ? 1 : month + 1
+  return `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`
 }
 
 export function roleLabel(position = '') {

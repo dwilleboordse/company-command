@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildAllocationSnapshot, buildHiringSignals, buildRosterAllocations, buildWorkloads, DEFAULT_CAPACITY, projectGrowthScenario } from './workforcePlanning.js'
+import { buildAllocationSnapshot, buildHiringSignals, buildRosterAllocations, buildWorkloads, DEFAULT_CAPACITY, nextMonthStart, projectGrowthScenario } from './workforcePlanning.js'
 
 const people = [
   { source_key: 'cs-1', display_name: 'CS One', discipline: 'creative_strategist', is_active: true },
@@ -186,4 +186,9 @@ test('month close snapshot preserves the live roster allocation without carrying
     ugc_enabled: true,
     notes: 'Frozen at month close',
   }])
+})
+
+test('next month is timezone-safe and rolls December into the new year', () => {
+  assert.equal(nextMonthStart('2026-08-01'), '2026-09-01')
+  assert.equal(nextMonthStart('2026-12-01'), '2027-01-01')
 })
