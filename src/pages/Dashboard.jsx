@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { Link } from 'react-router-dom'
-import { ArrowRight, CheckCircle2, Circle, AlertCircle, Compass } from 'lucide-react'
+import { ArrowRight, CheckCircle2, Circle, AlertCircle, CalendarDays, Compass } from 'lucide-react'
 import { today, getMondayStr, getMonday, addDays, parseLocal, fmtDisplay, DAYS, local } from '../lib/dates'
+import { formatSurveyMonth, previousSurveyMonth } from '../lib/monthlySurvey'
 
 function getKRStatus(current, goal, direction) {
   if (goal==null||current==null) return 'gray'
@@ -38,6 +39,28 @@ function currentQuarter() {
   return `Q${m<=3?1:m<=6?2:m<=9?3:4}-${y}`
 }
 
+function MonthlySurveyBanner({ submission, surveyMonth }) {
+  if (submission?.status === 'submitted') return null
+  const hasDraft = submission?.status === 'draft'
+  return (
+    <Link to="/monthly-survey" className="card" style={{
+      display:'flex',alignItems:'center',gap:13,padding:'13px 15px',marginBottom:14,
+      borderColor:'color-mix(in srgb, var(--amber) 35%, var(--border))',
+      background:'linear-gradient(135deg,var(--amber-dim),var(--bg-card) 70%)',textDecoration:'none'
+    }}>
+      <div style={{width:36,height:36,borderRadius:10,display:'grid',placeItems:'center',background:'var(--bg-card)',border:'1px solid var(--border)',color:'var(--amber)',flexShrink:0}}>
+        <CalendarDays size={18}/>
+      </div>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontSize:10,fontWeight:700,fontFamily:'var(--font-mono)',color:'var(--amber)',textTransform:'uppercase',letterSpacing:1}}>{hasDraft?'Survey draft waiting':'Monthly survey due'}</div>
+        <div style={{fontSize:13,fontWeight:650,color:'var(--text-primary)',marginTop:2}}>{formatSurveyMonth(surveyMonth)} Team Survey</div>
+        <div style={{fontSize:10,color:'var(--text-muted)',marginTop:2}}>{hasDraft?'Finish and submit your saved reflection.':'Review last month and share your feedback with Operations.'}</div>
+      </div>
+      <span style={{display:'inline-flex',alignItems:'center',gap:5,color:'var(--accent)',fontSize:11,fontWeight:650,whiteSpace:'nowrap'}}>{hasDraft?'Continue':'Start survey'}<ArrowRight size={13}/></span>
+    </Link>
+  )
+}
+
 export default function Dashboard() {
   const { profile, isManagement } = useAuth()
   const [objectives, setObjectives] = useState([])
@@ -49,11 +72,13 @@ export default function Dashboard() {
   const [spendEntries, setSpendEntries] = useState({})
   const [spendSummary, setSpendSummary] = useState({ totalDDU:0, totalAll:0, avgPct:null, atRisk:0, logged:0, total:0 })
   const [plan, setPlan] = useState(null)
+  const [surveySubmission, setSurveySubmission] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
   // Safety guard - should not happen with AuthContext but prevents blank screen
   const todayStr = today()
+  const surveyMonth = previousSurveyMonth()
   const weekStartStr = getMondayStr()
   const weekStart = getMonday()
   // Spend tracker logs for LAST week (data only complete after Monday)
@@ -108,6 +133,13 @@ export default function Dashboard() {
         const {data:planRow}=await supabase.from('hundred_day_plans').select('*').eq('user_id',profile.id).maybeSingle()
         setPlan(planRow || null)
       } catch { setPlan(null) }
+
+      // Monthly survey — the previous calendar month becomes due on the first.
+      try {
+        const {data:surveyRow}=await supabase.from('monthly_survey_submissions').select('id,status,submitted_at')
+          .eq('user_id',profile.id).eq('survey_month',surveyMonth).maybeSingle()
+        setSurveySubmission(surveyRow || null)
+      } catch { setSurveySubmission(null) }
 
       // Day entries
       try {
@@ -213,6 +245,8 @@ export default function Dashboard() {
           <div className="stat-box"><div className="stat-box-label">Total KRs</div><div className="stat-box-value text-accent">{myKRs.length}</div></div>
           <div className="stat-box"><div className="stat-box-label">Week Outcome</div><div className="stat-box-value" style={{fontSize:18,paddingTop:4}}>{weekOutcome?.outcomes?.length>0?<span className="text-green">Set ✓</span>:<span className="text-muted">—</span>}</div></div>
         </div>
+
+        <MonthlySurveyBanner submission={surveySubmission} surveyMonth={surveyMonth}/>
 
         {/* ── 100-DAY PLAN ── */}
         <HundredDayBanner plan={plan} />

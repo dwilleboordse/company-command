@@ -23,6 +23,7 @@ import ChurnAnalysis from './pages/ChurnAnalysis'
 
 const DesignCSOverview = lazy(() => import('./pages/DesignCSOverview'))
 const HiringRoadmap = lazy(() => import('./pages/HiringRoadmap'))
+const MonthlySurvey = lazy(() => import('./pages/MonthlySurvey'))
 
 function LoadingPage({ children }) {
   return <Suspense fallback={<div className="loading-screen"><div className="spinner"/></div>}>{children}</Suspense>
@@ -48,6 +49,7 @@ function AppRoutes() {
         <Route index element={<Dashboard/>}/>
         <Route path="okrs" element={<OKRs/>}/>
         <Route path="100-day-plan" element={<HundredDayPlan/>}/>
+        <Route path="monthly-survey" element={<LoadingPage><MonthlySurvey/></LoadingPage>}/>
         <Route path="calendar" element={<Calendar/>}/>
         <Route path="meetings" element={<Meetings/>}/>
         <Route path="spend" element={<SpendTracker/>}/>
