@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  cleanSurveyFeedback,
   previousMonthStart,
   previousSurveyMonth,
   requiredSurveyProgress,
   surveyAverage,
+  surveyFeedbackCount,
   surveyMonthOptions,
 } from './monthlySurvey.js'
 
@@ -43,4 +45,14 @@ test('survey average uses only submitted 1–10 responses', () => {
   ]
   assert.equal(surveyAverage({ status: 'submitted', responses: { one: 8, two: 9, note: 'Text' } }, questions), 8.5)
   assert.equal(surveyAverage({ status: 'draft', responses: { one: 10, two: 10 } }, questions), null)
+})
+
+test('survey feedback keeps only valid non-empty per-answer notes', () => {
+  const questions = [{ question_key: 'score' }, { question_key: 'reflection' }]
+  assert.deepEqual(cleanSurveyFeedback(questions, {
+    score: '  Clear improvement this month.  ',
+    reflection: '   ',
+    unknown: 'Should not be stored',
+  }), { score: 'Clear improvement this month.' })
+  assert.equal(surveyFeedbackCount(questions, { score: 'Good work', reflection: 'Next step' }), 2)
 })

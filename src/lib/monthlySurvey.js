@@ -59,3 +59,16 @@ export function surveyStatusLabel(submission) {
   if (submission?.status === 'draft') return 'Draft'
   return 'Not started'
 }
+
+export function cleanSurveyFeedback(questions = [], feedback = {}) {
+  const validKeys = new Set(questions.map(question => question.question_key))
+  return Object.fromEntries(Object.entries(feedback).flatMap(([key, value]) => {
+    if (!validKeys.has(key) || typeof value !== 'string') return []
+    const cleaned = value.trim()
+    return cleaned ? [[key, cleaned]] : []
+  }))
+}
+
+export function surveyFeedbackCount(questions = [], feedback = {}) {
+  return Object.keys(cleanSurveyFeedback(questions, feedback)).length
+}
