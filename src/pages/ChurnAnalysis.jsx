@@ -200,7 +200,7 @@ function LifecycleModal({ client, record, profileId, onClose, onSaved }) {
     const churnPayload = {
       client_id: client.id,
       engagement_start: form.engagement_start || null,
-      engagement_end: form.status === 'past' ? form.engagement_end || null : null,
+      engagement_end: form.status === 'active' ? null : form.engagement_end || null,
       monthly_retainer: form.monthly_retainer === '' ? null : Number(form.monthly_retainer),
       exit_type: form.exit_type || null,
       churn_reason: form.churn_reason || null,
@@ -238,6 +238,8 @@ function LifecycleModal({ client, record, profileId, onClose, onSaved }) {
   }
 
   const isPast = form.status === 'past'
+  const isPaused = form.status === 'paused'
+  const canEditEngagementEnd = isPast || isPaused
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -277,9 +279,14 @@ function LifecycleModal({ client, record, profileId, onClose, onSaved }) {
             <input type="date" value={form.engagement_start} onChange={event => setForm({ ...form, engagement_start: event.target.value })}/>
           </div>
           <div className="form-group">
-            <label>{isPast ? 'Engagement end' : 'Engagement end (past clients only)'}</label>
-            <input type="date" value={form.engagement_end} disabled={!isPast}
+            <label>{isPaused ? 'Paused on / engagement end' : isPast ? 'Engagement end' : 'Engagement end (paused or past only)'}</label>
+            <input type="date" value={form.engagement_end} disabled={!canEditEngagementEnd}
               onChange={event => setForm({ ...form, engagement_end: event.target.value })}/>
+            {isPaused && (
+              <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>
+                Tenure stops on this date. The client remains paused and is not counted as churn.
+              </span>
+            )}
           </div>
         </div>
 
