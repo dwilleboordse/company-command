@@ -107,6 +107,8 @@ function MyFeedbackPanel({ questions, submissions, feedbackRows }) {
 
   const activeItem = finalizedItems.find(item => item.submission.id === selectedSubmissionId) || finalizedItems[0]
   const answeredFeedback = questions.filter(question => activeItem.feedback.feedback?.[question.question_key])
+  const publishedPraises = activeItem.feedback.praises?.trim() || ''
+  const publishedGrowthNotes = activeItem.feedback.growth_notes?.trim() || ''
 
   return (
     <section className="card survey-my-feedback">
@@ -142,6 +144,24 @@ function MyFeedbackPanel({ questions, submissions, feedbackRows }) {
           )
         })}
       </div>
+      {(publishedPraises || publishedGrowthNotes) && (
+        <div className="survey-published-summary">
+          <div className="survey-published-summary-heading">
+            <CheckCircle2 size={15}/>
+            <div><h3>Praises &amp; growth notes</h3><p>Your finalized month-level review.</p></div>
+          </div>
+          <div className="survey-published-summary-grid">
+            <article>
+              <span>Praises</span>
+              <p>{publishedPraises || 'No praise was added for this review.'}</p>
+            </article>
+            <article>
+              <span>Growth notes</span>
+              <p>{publishedGrowthNotes || 'No growth note was added for this review.'}</p>
+            </article>
+          </div>
+        </div>
+      )}
     </section>
   )
 }
@@ -289,12 +309,20 @@ function FeedbackWorkspace({
   onFinalize,
 }) {
   const [draftFeedback, setDraftFeedback] = useState(() => feedbackRecord?.feedback || {})
+  const [praises, setPraises] = useState(() => feedbackRecord?.praises || '')
+  const [growthNotes, setGrowthNotes] = useState(() => feedbackRecord?.growth_notes || '')
   const cleanedFeedback = cleanSurveyFeedback(questions, draftFeedback)
   const savedFeedback = cleanSurveyFeedback(questions, feedbackRecord?.feedback || {})
-  const isDirty = questions.some(question => (
+  const cleanedPraises = praises.trim()
+  const cleanedGrowthNotes = growthNotes.trim()
+  const answerFeedbackDirty = questions.some(question => (
     (cleanedFeedback[question.question_key] || '') !== (savedFeedback[question.question_key] || '')
   ))
+  const summaryDirty = cleanedPraises !== (feedbackRecord?.praises || '').trim()
+    || cleanedGrowthNotes !== (feedbackRecord?.growth_notes || '').trim()
+  const isDirty = answerFeedbackDirty || summaryDirty
   const feedbackCount = surveyFeedbackCount(questions, draftFeedback)
+  const hasReviewContent = feedbackCount > 0 || Boolean(cleanedPraises) || Boolean(cleanedGrowthNotes)
   const finalized = feedbackRecord?.status === 'finalized'
 
   function setAnswerFeedback(questionKey, value) {
@@ -362,20 +390,72 @@ function FeedbackWorkspace({
         })}
       </div>
 
+      <section className="survey-feedback-summary-editor">
+        <div className="survey-feedback-summary-heading">
+          <div>
+            <div className="survey-feedback-eyebrow"><TrendingUp size={13}/>Month-level notes</div>
+            <h3>Praises &amp; growth notes</h3>
+            <p>Capture the wins worth reinforcing and the clearest next area for growth. These follow the same draft and finalization rules as per-answer feedback.</p>
+          </div>
+        </div>
+        <div className="survey-feedback-summary-grid">
+          <label>
+            <span>Praises</span>
+            <small>Recognize specific strengths, progress, or positive impact.</small>
+            {finalized ? (
+              <div className={`survey-feedback-final-text ${cleanedPraises ? '' : 'empty'}`}>
+                <p>{cleanedPraises || 'No praise was added for this review.'}</p>
+              </div>
+            ) : (
+              <textarea
+                rows={4}
+                maxLength={5000}
+                value={praises}
+                onChange={event => setPraises(event.target.value)}
+                disabled={saving}
+                placeholder="What should this team member keep doing?"
+              />
+            )}
+          </label>
+          <label>
+            <span>Growth notes</span>
+            <small>Record a practical development focus or next-step coaching note.</small>
+            {finalized ? (
+              <div className={`survey-feedback-final-text ${cleanedGrowthNotes ? '' : 'empty'}`}>
+                <p>{cleanedGrowthNotes || 'No growth note was added for this review.'}</p>
+              </div>
+            ) : (
+              <textarea
+                rows={4}
+                maxLength={5000}
+                value={growthNotes}
+                onChange={event => setGrowthNotes(event.target.value)}
+                disabled={saving}
+                placeholder="What is the most useful next area for growth?"
+              />
+            )}
+          </label>
+        </div>
+      </section>
+
       <div className={`survey-feedback-actions ${finalized ? 'finalized' : ''}`}>
         <div>
           {finalized ? <ShieldCheck size={17}/> : <LockKeyhole size={17}/>}
           <span>{finalized
             ? `Finalized ${formatSubmittedAt(feedbackRecord.finalized_at)}. This feedback is locked and visible to the team member.`
-            : `${feedbackCount} answer${feedbackCount === 1 ? '' : 's'} with feedback. Drafts remain private until finalized.`}</span>
+            : `${feedbackCount} answer${feedbackCount === 1 ? '' : 's'} with feedback${cleanedPraises || cleanedGrowthNotes ? ' plus month-level notes' : ''}. Drafts remain private until finalized.`}</span>
         </div>
         {!finalized && (
           <div className="survey-feedback-action-buttons">
-            <button type="button" className="btn btn-ghost" onClick={() => onSaveDraft(submission.id, cleanedFeedback)} disabled={!isDirty || saving}>
+            <button type="button" className="btn btn-ghost" onClick={() => onSaveDraft(submission.id, {
+              feedback: cleanedFeedback,
+              praises: cleanedPraises,
+              growth_notes: cleanedGrowthNotes,
+            })} disabled={!isDirty || saving}>
               <Save size={14}/>{saving ? 'Saving…' : feedbackRecord ? 'Save draft changes' : 'Save feedback draft'}
             </button>
             {canFinalize ? (
-              <button type="button" className="btn btn-primary" onClick={() => onFinalize(feedbackRecord)} disabled={!feedbackRecord || isDirty || feedbackCount === 0 || saving}>
+              <button type="button" className="btn btn-primary" onClick={() => onFinalize(feedbackRecord)} disabled={!feedbackRecord || isDirty || !hasReviewContent || saving}>
                 <ShieldCheck size={14}/>Finalize feedback
               </button>
             ) : <span className="survey-finalize-note">Operations or the CEO completes final review.</span>}
@@ -678,14 +758,14 @@ export default function MonthlySurvey() {
     setSaving(false)
   }
 
-  async function saveFeedbackDraft(submissionId, feedback) {
+  async function saveFeedbackDraft(submissionId, review) {
     if (!canReviewTeam || !submissionId || savingFeedbackId) return
     setSavingFeedbackId(submissionId)
     setError('')
     setMessage('')
     const { data, error: saveError } = await supabase
       .from('monthly_survey_feedback')
-      .upsert({ submission_id: submissionId, status: 'draft', feedback }, { onConflict: 'submission_id' })
+      .upsert({ submission_id: submissionId, status: 'draft', ...review }, { onConflict: 'submission_id' })
       .select()
       .single()
 
