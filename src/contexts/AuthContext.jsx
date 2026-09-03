@@ -72,7 +72,8 @@ export function AuthProvider({ children }) {
 
   const isCEO = profile?.role === 'ceo'
   const isManagement = profile?.role === 'management' || isCEO
-  const isOps = ['ops_manager', 'ops_assistant'].includes(profile?.position)
+  const isOps = profile?.department?.trim().toLowerCase() === 'operations'
+    || ['ops_manager', 'ops_assistant'].includes(profile?.position)
   const canSeeFinancials = isCEO
 
   return (
