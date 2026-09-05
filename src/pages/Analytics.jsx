@@ -18,6 +18,12 @@ const PLATFORM_COLORS = {
   meta:'#1877f2', tiktok:'#f43f5e', applovin:'#8b5cf6', google:'#34a853', other:'#64748b'
 }
 const RISK_COLORS = { Low:'#16a34a', Medium:'#d97706', High:'#dc2626', Critical:'#7c1d1d' }
+const PERIOD_SOURCES = [
+  { table:'spend_entries', dateField:'week_start' },
+  { table:'client_health_entries', dateField:'week_start' },
+  { table:'team_reviews', dateField:'week_start' },
+  { table:'change_log', dateField:'log_date' },
+]
 
 // ── mini metric card with sparkline ──
 function MetricCard({ label, value, sub, trend, trendData, color='var(--text-primary)', icon }) {
@@ -111,8 +117,8 @@ export default function Analytics() {
           fetchAllRows(()=>supabase.from('objectives').select('*').eq('is_active',true).order('id')),
           fetchAllRows(()=>supabase.from('key_results').select('*').eq('is_active',true).order('id')),
           fetchAllRows(()=>supabase.from('milestones').select('*').eq('is_active',true).order('id')),
-          ...['spend_entries','client_health_entries','team_reviews','change_log'].map(table=>
-            supabase.from(table).select('week_start').order('week_start').limit(1)),
+          ...PERIOD_SOURCES.map(({table,dateField})=>
+            supabase.from(table).select(dateField).order(dateField).limit(1)),
         ])
         const failed=results.find(result=>result.error)
         if (failed) throw failed.error
@@ -120,7 +126,7 @@ export default function Analytics() {
         const [c,ch,p,ob,oj,kr,ms,...firstDates]=results
         const dates=[
           ...ch.data.flatMap(record=>[record.engagement_start,record.engagement_end]),
-          ...firstDates.flatMap(result=>result.data.map(row=>row.week_start)),
+          ...firstDates.flatMap((result,index)=>result.data.map(row=>row[PERIOD_SOURCES[index].dateField])),
         ].filter(Boolean).sort()
         setBaseData({
           clients:c.data,profiles:p.data,onboardingItems:ob.data,objectives:oj.data,
@@ -146,10 +152,10 @@ export default function Analytics() {
       setPeriodError('')
       try {
         const results=await Promise.all(
-          ['spend_entries','client_health_entries','team_reviews','change_log'].map(table=>
+          PERIOD_SOURCES.map(({table,dateField})=>
             fetchAllRows(()=>supabase.from(table).select('*')
-              .gte('week_start',period.start).lte('week_start',period.end)
-              .order('week_start').order('id'))),
+              .gte(dateField,period.start).lte(dateField,period.end)
+              .order(dateField).order('id'))),
         )
         const failed=results.find(result=>result.error)
         if (failed) throw failed.error
@@ -206,8 +212,8 @@ export default function Analytics() {
     })
     const scoreOf = (e) => {
       if (!e) return null
-      const keys = ['communication','output_quality','strategic_value','trust','growth','responsiveness']
-      const vals = keys.map(k=>e[k]).filter(v=>v>0)
+      const keys = ['performance_health','creative_strategy','execution_delivery','strategic_alignment','communication']
+      const vals = keys.map(k=>Number(e[k])).filter(v=>v>0)
       return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null
     }
     const allScores = clients.map(c=>({
@@ -232,8 +238,8 @@ export default function Analytics() {
     const latestByUser = {}
     const reviewsByUser = {}
     teamReviews.forEach(r=>{
-      if (!reviewsByUser[r.user_id]) reviewsByUser[r.user_id]=[]
-      reviewsByUser[r.user_id].push(r)
+      if (!reviewsByUser[r.reviewee_id]) reviewsByUser[r.reviewee_id]=[]
+      reviewsByUser[r.reviewee_id].push(r)
     })
     Object.entries(reviewsByUser).forEach(([uid,arr])=>{
       arr.sort((a,b)=>b.week_start.localeCompare(a.week_start))
@@ -242,7 +248,7 @@ export default function Analytics() {
     const scoreOf = (r) => {
       if (!r) return null
       const keys = ['output_quality','client_relationship','responsiveness','cooperation','initiative','consistency']
-      const vals = keys.map(k=>r[k]).filter(v=>v>0)
+      const vals = keys.map(k=>Number(r[k])).filter(v=>v>0)
       return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null
     }
     const athletes = profiles.filter(p=>p.role==='athlete')
@@ -293,7 +299,7 @@ export default function Analytics() {
   const activityByPeriod = useMemo(()=>{
     return buildTimeBuckets(period,grain).map(bucket=>({
       ...bucket,
-      entries:changeLog.filter(entry=>entry.week_start>=bucket.start && entry.week_start<=bucket.end).length,
+      entries:changeLog.filter(entry=>entry.log_date>=bucket.start && entry.log_date<=bucket.end).length,
     }))
   },[changeLog,period,grain])
 
