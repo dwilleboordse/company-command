@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
+import { buildTimeBuckets, getPeriodOptions, resolvePeriod } from '../lib/reportingPeriods'
+import { fetchAllRows } from '../lib/reportingData'
 import {
   AlertTriangle,
   CalendarDays,
@@ -18,6 +20,7 @@ import {
   CartesianGrid,
   Cell,
   ComposedChart,
+  Legend,
   Line,
   Pie,
   PieChart,
@@ -79,14 +82,6 @@ function isoDate(date) {
   return `${year}-${month}-${day}`
 }
 
-function startOfMonth(date) {
-  return new Date(date.getFullYear(), date.getMonth(), 1)
-}
-
-function addMonths(date, count) {
-  return new Date(date.getFullYear(), date.getMonth() + count, 1)
-}
-
 function monthsBetween(startValue, endValue) {
   const start = parseDate(startValue)
   const end = parseDate(endValue)
@@ -111,12 +106,6 @@ function fmtDate(value) {
 
 function labelFor(options, value, fallback = 'Unclassified') {
   return options.find(option => option.value === value)?.label || fallback
-}
-
-function rangeStart(range, today = new Date()) {
-  if (range === 'ytd') return new Date(today.getFullYear(), 0, 1)
-  const months = Number(range.replace('m', '')) || 12
-  return addMonths(startOfMonth(today), -(months - 1))
 }
 
 function inDateRange(value, start, end) {
@@ -346,9 +335,9 @@ function LifecycleModal({ client, record, profileId, onClose, onSaved }) {
 
 async function fetchChurnData() {
   const [clientResult, churnResult, healthResult] = await Promise.all([
-    supabase.from('clients').select('*').order('name'),
-    supabase.from('client_churn_profiles').select('*'),
-    supabase.from('client_health_entries').select('client_id,week_start,churn_risk').order('week_start', { ascending: false }),
+    fetchAllRows(() => supabase.from('clients').select('*').order('name').order('id')),
+    fetchAllRows(() => supabase.from('client_churn_profiles').select('*').order('client_id')),
+    fetchAllRows(() => supabase.from('client_health_entries').select('client_id,week_start,churn_risk').order('week_start', { ascending: false }).order('client_id').order('id')),
   ])
 
   const error = clientResult.error || churnResult.error || healthResult.error
@@ -380,6 +369,10 @@ export default function ChurnAnalysis() {
   const [reasonFilter, setReasonFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [editingClient, setEditingClient] = useState(null)
+  const lifecycleDates = useMemo(() => Object.values(records)
+    .flatMap(record => [record.engagement_start, record.engagement_end]).filter(Boolean).sort(), [records])
+  const periodOptions = useMemo(() => getPeriodOptions(lifecycleDates), [lifecycleDates])
+  const period = useMemo(() => resolvePeriod(range, { earliestDate: lifecycleDates[0] }), [range, lifecycleDates])
 
   async function load() {
     setLoading(true)
@@ -412,14 +405,14 @@ export default function ChurnAnalysis() {
   }, [])
 
   const metrics = useMemo(() => {
-    const today = new Date()
-    const periodStart = rangeStart(range, today)
-    const periodEnd = today
+    const periodStart = parseDate(period.start)
+    const periodEnd = parseDate(period.end)
     const activeClients = clients.filter(client => statusOf(client) === 'active')
     const pausedClients = clients.filter(client => statusOf(client) === 'paused')
     const pastClients = clients.filter(client => statusOf(client) === 'past')
     const profileFor = client => records[client.id]
     const selectedExits = pastClients.filter(client => inDateRange(profileFor(client)?.engagement_end, periodStart, periodEnd))
+    const onboardedClients = clients.filter(client => inDateRange(profileFor(client)?.engagement_start, periodStart, periodEnd))
 
     const openingClients = clients.filter(client => {
       const record = profileFor(client)
@@ -427,9 +420,12 @@ export default function ChurnAnalysis() {
       const end = parseDate(record?.engagement_end)
       return Boolean(start && start < periodStart && (!end || end >= periodStart))
     })
+    const openingClientIds = new Set(openingClients.map(client => client.id))
+    const openingCohortExits = selectedExits.filter(client => openingClientIds.has(client.id))
     const openingMRR = openingClients.reduce((total, client) => total + (Number(profileFor(client)?.monthly_retainer) || 0), 0)
-    const lostMRR = selectedExits.reduce((total, client) => total + (Number(profileFor(client)?.monthly_retainer) || 0), 0)
-    const knownExitMRR = selectedExits.filter(client => profileFor(client)?.monthly_retainer != null).length
+    const lostMRR = openingCohortExits.reduce((total, client) => total + (Number(profileFor(client)?.monthly_retainer) || 0), 0)
+    const knownOpeningMRR = openingClients.filter(client => profileFor(client)?.monthly_retainer != null).length
+    const knownExitMRR = openingCohortExits.filter(client => profileFor(client)?.monthly_retainer != null).length
     const activeMRR = activeClients.reduce((total, client) => total + (Number(profileFor(client)?.monthly_retainer) || 0), 0)
     const knownActiveMRR = activeClients.filter(client => profileFor(client)?.monthly_retainer != null).length
     const tenures = selectedExits
@@ -447,25 +443,28 @@ export default function ChurnAnalysis() {
       return baseComplete && Boolean(record?.engagement_end && record?.churn_reason && record?.preventability)
     }).length
 
-    const churnRate = openingClients.length ? (selectedExits.length / openingClients.length) * 100 : null
+    const churnRate = openingClients.length ? (openingCohortExits.length / openingClients.length) * 100 : null
     const revenueChurnRate = openingMRR ? (lostMRR / openingMRR) * 100 : null
 
-    const monthCount = range === 'ytd' ? today.getMonth() + 1 : Number(range.replace('m', ''))
-    const trend = Array.from({ length: monthCount }, (_, index) => {
-      const monthStart = addMonths(startOfMonth(today), index - (monthCount - 1))
-      const nextMonth = addMonths(monthStart, 1)
-      const monthEnd = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), 0)
+    const trend = buildTimeBuckets(period, 'month').map(bucket => {
+      const monthStart = parseDate(bucket.start)
+      const monthEnd = parseDate(bucket.end)
       const exits = pastClients.filter(client => inDateRange(profileFor(client)?.engagement_end, monthStart, monthEnd))
+      const onboarded = clients.filter(client => inDateRange(profileFor(client)?.engagement_start, monthStart, monthEnd))
       const opening = clients.filter(client => {
         const record = profileFor(client)
         const start = parseDate(record?.engagement_start)
         const end = parseDate(record?.engagement_end)
         return Boolean(start && start < monthStart && (!end || end >= monthStart))
       })
+      const openingIds = new Set(opening.map(client => client.id))
+      const cohortExits = exits.filter(client => openingIds.has(client.id))
       return {
-        month: monthStart.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
+        month: bucket.label,
+        fullLabel: `${bucket.fullLabel} · ${fmtDate(bucket.start)} – ${fmtDate(bucket.end)}`,
+        onboarded: onboarded.length,
         exits: exits.length,
-        churnRate: opening.length ? Number(((exits.length / opening.length) * 100).toFixed(1)) : null,
+        churnRate: opening.length ? Number(((cohortExits.length / opening.length) * 100).toFixed(1)) : null,
       }
     })
 
@@ -507,21 +506,26 @@ export default function ChurnAnalysis() {
     })
 
     return {
-      periodStart,
       activeClients,
       pausedClients,
       pastClients,
       selectedExits,
+      onboardedClients,
       openingClients,
+      openingCohortExits,
       activeMRR,
       knownActiveMRR,
       lostMRR,
       knownExitMRR,
+      knownOpeningMRR,
       averageTenure,
+      knownTenures: tenures.length,
       atRiskClients,
       atRiskMRR,
       knownAtRiskMRR,
       completeRecords,
+      missingStartDates: clients.filter(client => !profileFor(client)?.engagement_start).length,
+      missingExitDates: pastClients.filter(client => !profileFor(client)?.engagement_end).length,
       churnRate,
       revenueChurnRate,
       trend,
@@ -529,7 +533,7 @@ export default function ChurnAnalysis() {
       preventabilityData,
       cohorts,
     }
-  }, [clients, records, latestHealth, range])
+  }, [clients, records, latestHealth, period])
 
   const filteredClients = useMemo(() => clients.filter(client => {
     const status = statusOf(client)
@@ -593,11 +597,8 @@ export default function ChurnAnalysis() {
             <p className="page-subtitle">Retention, revenue loss, exit drivers, cohorts, and the complete client lifecycle</p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <select value={range} onChange={event => setRange(event.target.value)} style={{ width: 'auto', fontSize: 12 }}>
-              <option value="3m">Last 3 months</option>
-              <option value="6m">Last 6 months</option>
-              <option value="12m">Last 12 months</option>
-              <option value="ytd">Year to date</option>
+            <select aria-label="Churn analysis period" value={range} onChange={event => setRange(event.target.value)} style={{ width: 'auto', fontSize: 12 }}>
+              {periodOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
             <button className="btn btn-ghost btn-sm" onClick={exportCsv} disabled={!clients.length}><Download size={13}/> Export CSV</button>
           </div>
@@ -616,22 +617,23 @@ export default function ChurnAnalysis() {
           </div>
         ) : (
           <>
+            <p style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 14 }}>
+              <strong style={{ color: 'var(--text-secondary)' }}>{period.label}</strong> · {period.dateLabel}. Churn rates, exits, lifetime, and exit drivers use this period. Current client, revenue, and risk totals show today’s position.
+            </p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 12, marginBottom: 24 }}>
               <MetricCard icon={<Users size={13}/>} label="Current clients" value={metrics.activeClients.length}
-                detail={`${metrics.pausedClients.length} paused · ${metrics.pastClients.length} past`} color="var(--green)"/>
+                detail={`Today · ${metrics.pausedClients.length} paused · ${metrics.pastClients.length} past`} color="var(--green)"/>
               <MetricCard icon={<DollarSign size={13}/>} label="Active MRR" value={metrics.knownActiveMRR ? fmtMoney(metrics.activeMRR) : '—'}
-                detail={`${metrics.knownActiveMRR}/${metrics.activeClients.length} current retainers recorded`} color="var(--accent)"/>
-              <MetricCard icon={<TrendingDown size={13}/>} label="Client churn rate"
+                detail={`Today · ${metrics.knownActiveMRR}/${metrics.activeClients.length} retainers recorded`} color="var(--accent)"/>
+              <MetricCard icon={<TrendingDown size={13}/>} label="Opening client churn"
                 value={metrics.churnRate == null ? '—' : `${metrics.churnRate.toFixed(1)}%`}
-                detail={`${metrics.selectedExits.length} dated exits / ${metrics.openingClients.length} opening clients`}/>
-              <MetricCard icon={<DollarSign size={13}/>} label="Revenue churn"
+                detail={`${metrics.openingCohortExits.length} exits from ${metrics.openingClients.length} clients present at period start`}/>
+              <MetricCard icon={<DollarSign size={13}/>} label="Recorded revenue churn"
                 value={metrics.revenueChurnRate == null ? '—' : `${metrics.revenueChurnRate.toFixed(1)}%`}
-                detail={metrics.selectedExits.length
-                  ? `${metrics.knownExitMRR ? fmtMoney(metrics.lostMRR) : 'Unknown'} MRR lost · ${metrics.knownExitMRR}/${metrics.selectedExits.length} retainers known`
-                  : 'No dated exits in selected period'} color="var(--red)"/>
+                detail={`${metrics.knownExitMRR || !metrics.openingCohortExits.length ? fmtMoney(metrics.lostMRR) : 'Unknown'} recorded MRR lost · ${metrics.knownOpeningMRR}/${metrics.openingClients.length} opening retainers known`} color="var(--red)"/>
               <MetricCard icon={<CalendarDays size={13}/>} label="Average lifetime"
                 value={metrics.averageTenure == null ? '—' : `${metrics.averageTenure.toFixed(1)} mo`}
-                detail={`${metrics.selectedExits.length} exits in period`}/>
+                detail={`${metrics.knownTenures}/${metrics.selectedExits.length} period exits have both dates`}/>
               <MetricCard icon={<AlertTriangle size={13}/>} label="Current risk"
                 value={metrics.atRiskClients.length} detail={metrics.atRiskClients.length
                   ? `${metrics.knownAtRiskMRR ? fmtMoney(metrics.atRiskMRR) : 'Unknown'} MRR at risk · ${metrics.knownAtRiskMRR}/${metrics.atRiskClients.length} retainers known`
@@ -657,24 +659,46 @@ export default function ChurnAnalysis() {
 
             <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.65fr) minmax(280px,0.85fr)', gap: 16, marginBottom: 24 }}>
               <div className="card" style={{ padding: 18 }}>
-                <SectionHeader title="Churn movement" subtitle="Monthly client exits and logo churn rate for records with complete lifecycle dates"/>
-                {metrics.trend.some(month => month.exits > 0 || month.churnRate != null) ? (
+                <SectionHeader title="Churn movement" subtitle={`Monthly onboardings and exits · ${period.dateLabel}`}/>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 10, marginBottom: 18 }}>
+                  {[
+                    { label: 'Onboarded', value: metrics.onboardedClients.length, color: 'var(--green)' },
+                    { label: 'Exited', value: metrics.selectedExits.length, color: 'var(--red)' },
+                    { label: 'Net movement', value: `${metrics.onboardedClients.length - metrics.selectedExits.length > 0 ? '+' : ''}${metrics.onboardedClients.length - metrics.selectedExits.length}`, color: metrics.onboardedClients.length >= metrics.selectedExits.length ? 'var(--green)' : 'var(--red)' },
+                  ].map(item => (
+                    <div key={item.label} style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>{item.label}</div>
+                      <strong style={{ fontFamily: 'var(--font-mono)', fontSize: 20, color: item.color }}>{item.value}</strong>
+                    </div>
+                  ))}
+                </div>
+                {metrics.trend.some(month => month.onboarded > 0 || month.exits > 0 || month.churnRate != null) ? (
                   <ResponsiveContainer width="100%" height={250}>
                     <ComposedChart data={metrics.trend} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
                       <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false}/>
                       <XAxis dataKey="month" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false}/>
                       <YAxis yAxisId="clients" allowDecimals={false} tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false}/>
                       <YAxis yAxisId="rate" orientation="right" unit="%" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false}/>
-                      <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11 }} />
+                      <Tooltip labelFormatter={(label, payload) => payload?.[0]?.payload?.fullLabel || label} formatter={(value, name) => [name === 'Opening client churn' ? `${value}%` : value, name]} contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11 }} />
+                      <Legend wrapperStyle={{ fontSize: 10, paddingTop: 12 }}/>
+                      <Bar yAxisId="clients" dataKey="onboarded" name="Clients onboarded" fill="var(--green)" radius={[4, 4, 0, 0]} maxBarSize={28}/>
                       <Bar yAxisId="clients" dataKey="exits" name="Client exits" fill="var(--red)" radius={[4, 4, 0, 0]} maxBarSize={28}/>
-                      <Line yAxisId="rate" type="monotone" dataKey="churnRate" name="Churn rate %" stroke="var(--accent)" strokeWidth={2.2} dot={{ r: 3, fill: 'var(--accent)' }} connectNulls={false}/>
+                      <Line yAxisId="rate" type="monotone" dataKey="churnRate" name="Opening client churn" stroke="var(--accent)" strokeWidth={2.2} dot={{ r: 3, fill: 'var(--accent)' }} connectNulls={false}/>
                     </ComposedChart>
                   </ResponsiveContainer>
                 ) : <EmptyChart>Add engagement start and end dates to calculate monthly churn movement.</EmptyChart>}
+                <p style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 12, lineHeight: 1.5 }}>
+                  Onboardings use engagement start dates; exits use past clients’ end dates. The rate measures exits among clients present at the start of each displayed month. Clients joining and leaving within the month appear in both bars. Revenue churn uses recorded retainers, which may differ from historical amounts.
+                </p>
+                {(metrics.missingStartDates > 0 || metrics.missingExitDates > 0) && (
+                  <p style={{ fontSize: 10, color: 'var(--amber)', marginTop: 7, lineHeight: 1.5 }}>
+                    Across all records: {metrics.missingStartDates} clients lack a start date and cannot be placed in onboardings; {metrics.missingExitDates} past clients lack an end date and cannot be placed in exit totals.
+                  </p>
+                )}
               </div>
 
               <div className="card" style={{ padding: 18 }}>
-                <SectionHeader title="Why clients leave" subtitle={`${metrics.periodStart.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })} to today`}/>
+                <SectionHeader title="Why clients leave" subtitle={period.dateLabel}/>
                 {metrics.reasonData.length ? (
                   <>
                     <ResponsiveContainer width="100%" height={175}>
@@ -701,7 +725,7 @@ export default function ChurnAnalysis() {
 
             <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px,0.8fr) minmax(0,1.2fr)', gap: 16, marginBottom: 28 }}>
               <div className="card" style={{ padding: 18 }}>
-                <SectionHeader title="Preventability" subtitle="Separates delivery problems from unavoidable exits"/>
+                <SectionHeader title="Preventability" subtitle={`Selected period · ${period.dateLabel}`}/>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 15, marginTop: 20 }}>
                   {metrics.preventabilityData.map((item, index) => {
                     const max = Math.max(...metrics.preventabilityData.map(row => row.count), 1)
@@ -723,14 +747,14 @@ export default function ChurnAnalysis() {
 
               <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
                 <div style={{ padding: '16px 18px 10px' }}>
-                  <SectionHeader title="Retention by starting cohort" subtitle="Retained includes current and paused engagements; requires start dates"/>
+                  <SectionHeader title="Retention by starting cohort" subtitle="All-time cohorts, status today · retained includes current and paused engagements"/>
                 </div>
                 {metrics.cohorts.length ? (
                   <div className="table-wrap">
                     <table>
                       <thead><tr><th>Cohort</th><th>Started</th><th>Retained</th><th>Past</th><th>Retention</th><th>Avg exit tenure</th></tr></thead>
                       <tbody>
-                        {metrics.cohorts.slice(0, 8).map(cohort => (
+                        {metrics.cohorts.map(cohort => (
                           <tr key={cohort.cohort}>
                             <td style={{ fontWeight: 650 }}>{cohort.cohort}</td>
                             <td>{cohort.started}</td>
@@ -748,7 +772,7 @@ export default function ChurnAnalysis() {
             </div>
 
             <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
-              <SectionHeader title="Current and past client records" subtitle="Manage lifecycle status and the inputs behind every churn metric"/>
+              <SectionHeader title="Current and past client records" subtitle="All-time directory · lifecycle records are independent of the analysis period"/>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 <div style={{ position: 'relative' }}>
                   <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}/>

@@ -1,8 +1,11 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
-import { TrendingUp, TrendingDown, Users, DollarSign, Target, AlertTriangle, Activity, Download } from 'lucide-react'
-import { LineChart, Line, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, CartesianGrid } from 'recharts'
+import { aggregateSpend, buildTimeBuckets, getPeriodOptions, resolvePeriod } from '../lib/reportingPeriods'
+import { fetchAllRows } from '../lib/reportingData'
+import ChurnTenureAnalysis from '../components/ChurnTenureAnalysis'
+import { TrendingUp, TrendingDown, Users, DollarSign, Target, AlertTriangle, Activity } from 'lucide-react'
+import { LineChart, Line, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, CartesianGrid, Legend } from 'recharts'
 
 // ── helpers ──
 function fmtMoney(n) {
@@ -10,19 +13,6 @@ function fmtMoney(n) {
   if (n>=1000000) return '$'+(n/1000000).toFixed(1)+'M'
   if (n>=1000) return '$'+(n/1000).toFixed(1)+'k'
   return '$'+Math.round(n)
-}
-function pct(num,den) { return den>0 ? Math.round((num/den)*100) : 0 }
-function weekStartStr(d=new Date()) {
-  const x=new Date(d); const day=x.getDay(); const diff=day===0?-6:1-day
-  x.setDate(x.getDate()+diff); return x.toISOString().split('T')[0]
-}
-function lastNWeeks(n) {
-  const weeks=[]; const now=new Date()
-  for (let i=n-1;i>=0;i--) {
-    const d=new Date(now); d.setDate(d.getDate()-i*7)
-    weeks.push(weekStartStr(d))
-  }
-  return weeks
 }
 const PLATFORM_COLORS = {
   meta:'#1877f2', tiktok:'#f43f5e', applovin:'#8b5cf6', google:'#34a853', other:'#64748b'
@@ -83,98 +73,121 @@ function Section({ title, subtitle, action, children }) {
 
 // ── MAIN ──
 export default function Analytics() {
-  const { profile, isManagement } = useAuth()
-  const [loading,setLoading]=useState(true)
-  const [range,setRange]=useState('4w')  // 4w, 12w, q
+  const { isManagement } = useAuth()
+  const [baseLoading,setBaseLoading]=useState(true)
+  const [periodLoading,setPeriodLoading]=useState(true)
+  const [baseError,setBaseError]=useState('')
+  const [periodError,setPeriodError]=useState('')
+  const [reloadToken,setReloadToken]=useState(0)
+  const [range,setRange]=useState('12m')
+  const [grain,setGrain]=useState('month')
+  const [today]=useState(()=>new Date())
+  const [baseData,setBaseData]=useState(null)
 
   // raw data
-  const [clients,setClients]=useState([])
   const [spendEntries,setSpendEntries]=useState([])
   const [healthEntries,setHealthEntries]=useState([])
   const [teamReviews,setTeamReviews]=useState([])
-  const [profiles,setProfiles]=useState([])
   const [changeLog,setChangeLog]=useState([])
-  const [onboardingItems,setOnboardingItems]=useState([])
-  const [objectives,setObjectives]=useState([])
-  const [keyResults,setKeyResults]=useState([])
-  const [milestones,setMilestones]=useState([])
+  const { clients:allClients=[], profiles=[], onboardingItems=[], objectives=[], keyResults=[], milestones=[], records={}, availableDates=[], earliestDate } = baseData || {}
+  const clients = useMemo(()=>allClients.filter(client=>client.is_active===true),[allClients])
+  const period = useMemo(()=>resolvePeriod(range,{today,earliestDate}),[range,today,earliestDate])
+  const periodOptions = useMemo(()=>getPeriodOptions(availableDates,today),[availableDates,today])
+  const loading = baseLoading || periodLoading
+  const error = baseError || periodError
 
-  useEffect(()=>{ load() },[range])
+  useEffect(()=>{
+    if (!isManagement) return
+    let cancelled=false
+    async function loadBase() {
+      setBaseLoading(true)
+      setBaseError('')
+      try {
+        const results=await Promise.all([
+          fetchAllRows(()=>supabase.from('clients').select('*').order('id')),
+          fetchAllRows(()=>supabase.from('client_churn_profiles').select('*').order('client_id')),
+          fetchAllRows(()=>supabase.from('profiles').select('id,full_name,role,position').eq('is_active',true).order('id')),
+          fetchAllRows(()=>supabase.from('onboarding_checklists').select('*').order('id')),
+          fetchAllRows(()=>supabase.from('objectives').select('*').eq('is_active',true).order('id')),
+          fetchAllRows(()=>supabase.from('key_results').select('*').eq('is_active',true).order('id')),
+          fetchAllRows(()=>supabase.from('milestones').select('*').eq('is_active',true).order('id')),
+          ...['spend_entries','client_health_entries','team_reviews','change_log'].map(table=>
+            supabase.from(table).select('week_start').order('week_start').limit(1)),
+        ])
+        const failed=results.find(result=>result.error)
+        if (failed) throw failed.error
+        if (cancelled) return
+        const [c,ch,p,ob,oj,kr,ms,...firstDates]=results
+        const dates=[
+          ...ch.data.flatMap(record=>[record.engagement_start,record.engagement_end]),
+          ...firstDates.flatMap(result=>result.data.map(row=>row.week_start)),
+        ].filter(Boolean).sort()
+        setBaseData({
+          clients:c.data,profiles:p.data,onboardingItems:ob.data,objectives:oj.data,
+          keyResults:kr.data,milestones:ms.data,
+          records:Object.fromEntries(ch.data.map(record=>[record.client_id,record])),
+          availableDates:dates,earliestDate:dates[0],
+        })
+      } catch (loadError) {
+        if (!cancelled) setBaseError(`Analytics could not load: ${loadError.message || 'Please try again.'}`)
+      } finally {
+        if (!cancelled) setBaseLoading(false)
+      }
+    }
+    loadBase()
+    return ()=>{ cancelled=true }
+  },[isManagement,reloadToken])
 
-  async function load() {
-    setLoading(true)
-    const weeks = range==='4w'?4:range==='12w'?12:13
-    const weekList = lastNWeeks(weeks)
-    const earliestWeek = weekList[0]
-
-    const [c,s,h,t,p,cl,ob,oj,kr,ms]=await Promise.all([
-      supabase.from('clients').select('*').eq('is_active',true),
-      supabase.from('spend_entries').select('*').gte('week_start',earliestWeek),
-      supabase.from('client_health_entries').select('*').gte('week_start',earliestWeek),
-      supabase.from('team_reviews').select('*').gte('week_start',earliestWeek),
-      supabase.from('profiles').select('id,full_name,role,position').eq('is_active', true).order('full_name'),
-      supabase.from('change_log').select('*').gte('week_start',earliestWeek),
-      supabase.from('onboarding_checklists').select('*'),
-      supabase.from('objectives').select('*').eq('is_active',true),
-      supabase.from('key_results').select('*').eq('is_active',true),
-      supabase.from('milestones').select('*').eq('is_active',true),
-    ])
-    setClients(c.data||[])
-    setSpendEntries(s.data||[])
-    setHealthEntries(h.data||[])
-    setTeamReviews(t.data||[])
-    setProfiles(p.data||[])
-    setChangeLog(cl.data||[])
-    setOnboardingItems(ob.data||[])
-    setObjectives(oj.data||[])
-    setKeyResults(kr.data||[])
-    setMilestones(ms.data||[])
-    setLoading(false)
-  }
+  useEffect(()=>{
+    if (!isManagement || !baseData) return
+    let cancelled=false
+    async function loadPeriod() {
+      setPeriodLoading(true)
+      setPeriodError('')
+      try {
+        const results=await Promise.all(
+          ['spend_entries','client_health_entries','team_reviews','change_log'].map(table=>
+            fetchAllRows(()=>supabase.from(table).select('*')
+              .gte('week_start',period.start).lte('week_start',period.end)
+              .order('week_start').order('id'))),
+        )
+        const failed=results.find(result=>result.error)
+        if (failed) throw failed.error
+        if (cancelled) return
+        const [s,h,t,cl]=results
+        setSpendEntries(s.data)
+        setHealthEntries(h.data)
+        setTeamReviews(t.data)
+        setChangeLog(cl.data)
+      } catch (loadError) {
+        if (!cancelled) setPeriodError(`This period could not load: ${loadError.message || 'Please try again.'}`)
+      } finally {
+        if (!cancelled) setPeriodLoading(false)
+      }
+    }
+    loadPeriod()
+    return ()=>{ cancelled=true }
+  },[isManagement,baseData,period.start,period.end,range,reloadToken])
 
   // ── REVENUE & SPEND METRICS ──
   const spendMetrics = useMemo(()=>{
-    const weeks = lastNWeeks(range==='4w'?4:range==='12w'?12:13)
-    // total spend + DDU spend per week
-    const perWeek = weeks.map(w=>{
-      const entries = spendEntries.filter(e=>e.week_start===w)
-      return {
-        week: w.slice(5),
-        total: entries.reduce((s,e)=>s+(parseFloat(e.total_spend)||0),0),
-        ddu: entries.reduce((s,e)=>s+(parseFloat(e.ddu_spend)||0),0),
-      }
-    })
-    const currTotal = perWeek[perWeek.length-1]?.total||0
-    const prevTotal = perWeek[perWeek.length-2]?.total||0
-    const currDDU = perWeek[perWeek.length-1]?.ddu||0
-    const prevDDU = perWeek[perWeek.length-2]?.ddu||0
-    const allTimeTotal = perWeek.reduce((s,w)=>s+w.total,0)
-    const allTimeDDU = perWeek.reduce((s,w)=>s+w.ddu,0)
-    const avgShare = allTimeTotal>0 ? (allTimeDDU/allTimeTotal)*100 : 0
-    return {
-      perWeek,
-      currTotal, prevTotal,
-      currDDU, prevDDU,
-      totalTrend: prevTotal>0 ? ((currTotal-prevTotal)/prevTotal)*100 : 0,
-      dduTrend: prevDDU>0 ? ((currDDU-prevDDU)/prevDDU)*100 : 0,
-      allTimeTotal, allTimeDDU,
-      avgShare,
-    }
-  },[spendEntries, range])
+    const buckets=aggregateSpend(spendEntries,period,grain)
+    const total=buckets.reduce((sum,bucket)=>sum+(bucket.total||0),0)
+    const ddu=buckets.reduce((sum,bucket)=>sum+(bucket.ddu||0),0)
+    const entryCount=buckets.reduce((sum,bucket)=>sum+bucket.entryCount,0)
+    return {buckets,total,ddu,entryCount,avgShare:total>0?(ddu/total)*100:0}
+  },[spendEntries,period,grain])
 
-  // ── platform distribution (latest week) ──
+  // ── platform distribution (selected period) ──
   const platformMix = useMemo(()=>{
-    const latestWeek = spendMetrics.perWeek[spendMetrics.perWeek.length-1]?.week
-    if (!latestWeek) return []
-    const full = `2026-${latestWeek}`
-    const entries = spendEntries.filter(e=>e.week_start===full || e.week_start.endsWith(latestWeek))
+    const entries=spendEntries.filter(entry=>entry.week_start>=period.start && entry.week_start<=period.end)
     return [
-      {name:'Meta',    value:entries.reduce((s,e)=>s+(e.meta_total_spend||0),0),    color:PLATFORM_COLORS.meta},
-      {name:'TikTok',  value:entries.reduce((s,e)=>s+(e.tiktok_total_spend||0),0),  color:PLATFORM_COLORS.tiktok},
-      {name:'Google',  value:entries.reduce((s,e)=>s+(e.google_total_spend||0),0),  color:PLATFORM_COLORS.google},
-      {name:'AppLovin',value:entries.reduce((s,e)=>s+(e.applovin_total_spend||0),0),color:PLATFORM_COLORS.applovin},
+      {name:'Meta',    value:entries.reduce((s,e)=>s+(Number(e.meta_total_spend)||0),0),    color:PLATFORM_COLORS.meta},
+      {name:'TikTok',  value:entries.reduce((s,e)=>s+(Number(e.tiktok_total_spend)||0),0),  color:PLATFORM_COLORS.tiktok},
+      {name:'Google',  value:entries.reduce((s,e)=>s+(Number(e.google_total_spend)||0),0),  color:PLATFORM_COLORS.google},
+      {name:'AppLovin',value:entries.reduce((s,e)=>s+(Number(e.applovin_total_spend)||0),0),color:PLATFORM_COLORS.applovin},
     ].filter(x=>x.value>0)
-  },[spendEntries, spendMetrics])
+  },[spendEntries,period])
 
   // ── CLIENT HEALTH ──
   const healthMetrics = useMemo(()=>{
@@ -276,14 +289,13 @@ export default function Analytics() {
     return { company:companyWithProgress, byTeam:Object.values(byTeam), overallOKR, totalKRs:keyResults.length, totalInits:milestones.length, doneInits:milestones.filter(m=>m.status==='completed').length }
   },[objectives, keyResults, milestones])
 
-  // ── ACTIVITY VOLUME (change log per week) ──
-  const activityByWeek = useMemo(()=>{
-    const weeks = lastNWeeks(range==='4w'?4:range==='12w'?12:13)
-    return weeks.map(w=>({
-      week: w.slice(5),
-      entries: changeLog.filter(c=>c.week_start===w).length
+  // ── ACTIVITY VOLUME (selected period and grouping) ──
+  const activityByPeriod = useMemo(()=>{
+    return buildTimeBuckets(period,grain).map(bucket=>({
+      ...bucket,
+      entries:changeLog.filter(entry=>entry.week_start>=bucket.start && entry.week_start<=bucket.end).length,
     }))
-  },[changeLog, range])
+  },[changeLog,period,grain])
 
   // ── ONBOARDING COMPLETION ──
   const onboardingMetrics = useMemo(()=>{
@@ -314,61 +326,60 @@ export default function Analytics() {
         <div className="flex items-center justify-between" style={{flexWrap:'wrap',gap:10}}>
           <div>
             <h1 className="page-title">Analytics</h1>
-            <p className="page-subtitle">Real signals from across the agency — updated live</p>
+            <p className="page-subtitle">Agency performance · {period.dateLabel}</p>
           </div>
-          <div style={{display:'flex',border:'1.5px solid var(--border)',borderRadius:'var(--radius)',overflow:'hidden'}}>
-            {[{k:'4w',l:'4 weeks'},{k:'12w',l:'12 weeks'},{k:'q',l:'Quarter'}].map(r=>(
-              <button key={r.k} onClick={()=>setRange(r.k)}
-                style={{padding:'7px 14px',border:'none',cursor:'pointer',fontSize:12,fontWeight:600,
-                  background:range===r.k?'var(--accent)':'transparent',
-                  color:range===r.k?'#fff':'var(--text-secondary)',transition:'all 0.12s'}}>
-                {r.l}
-              </button>
-            ))}
-          </div>
+          <label style={{display:'flex',alignItems:'center',gap:8,fontSize:12,color:'var(--text-secondary)'}}>
+            Period
+            <select aria-label="Analytics period" value={range} onChange={event=>{setPeriodLoading(true);setRange(event.target.value)}} style={{minWidth:170}}>
+              {periodOptions.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
         </div>
       </div>
 
       <div className="page-body">
-        {loading?(
+        {error?(
+          <div className="card" role="alert" style={{padding:24}}>
+            <p style={{color:'var(--red)',marginBottom:12}}>{error}</p>
+            <button className="btn btn-secondary" onClick={()=>setReloadToken(value=>value+1)}>Try again</button>
+          </div>
+        ):loading?(
           <div className="loading-screen" style={{minHeight:300,background:'transparent'}}><div className="spinner"/></div>
         ):(
           <>
             {/* ═══ TOP METRICS ROW ═══ */}
             <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:12,marginBottom:24}}>
               <MetricCard
-                label="Total Ad Spend (last week)"
+                label="Total Ad Spend (period)"
                 icon={<DollarSign size={12}/>}
-                value={fmtMoney(spendMetrics.currTotal)}
-                sub={`${fmtMoney(spendMetrics.allTimeTotal)} across range`}
-                trend={spendMetrics.totalTrend}
-                trendData={spendMetrics.perWeek.map(w=>({v:w.total}))}
+                value={spendMetrics.entryCount?fmtMoney(spendMetrics.total):'—'}
+                sub={spendMetrics.entryCount?`${period.label} · ${spendMetrics.entryCount} weekly entries`:'No spend entries in this period'}
+                trendData={spendMetrics.buckets.map(bucket=>({v:bucket.total}))}
               />
               <MetricCard
-                label="DDU Creative Spend"
+                label="DDU Creative Spend (period)"
                 icon={<DollarSign size={12}/>}
-                value={fmtMoney(spendMetrics.currDDU)}
-                sub={`${spendMetrics.avgShare.toFixed(0)}% avg share of total`}
-                trend={spendMetrics.dduTrend}
-                trendData={spendMetrics.perWeek.map(w=>({v:w.ddu}))}
+                value={spendMetrics.entryCount?fmtMoney(spendMetrics.ddu):'—'}
+                sub={spendMetrics.entryCount?`${spendMetrics.avgShare.toFixed(0)}% of total spend in period`:'No spend entries in this period'}
+                trendData={spendMetrics.buckets.map(bucket=>({v:bucket.ddu}))}
                 color="var(--accent)"
               />
               <MetricCard
-                label="Client Health (avg)"
+                label="Client Health (period)"
                 icon={<Users size={12}/>}
-                value={healthMetrics.avgScore.toFixed(1)}
-                sub={`${healthMetrics.totalTracked}/${healthMetrics.totalClients} clients reviewed`}
+                value={healthMetrics.totalTracked?healthMetrics.avgScore.toFixed(1):'—'}
+                sub={`${healthMetrics.totalTracked}/${healthMetrics.totalClients} current clients reviewed`}
                 color={healthMetrics.avgScore>=4?'var(--green)':healthMetrics.avgScore>=3?'var(--amber)':'var(--red)'}
               />
               <MetricCard
-                label="Team Health (avg)"
+                label="Team Health (period)"
                 icon={<Activity size={12}/>}
-                value={teamMetrics.avg.toFixed(1)}
+                value={teamMetrics.reviewed?teamMetrics.avg.toFixed(1):'—'}
                 sub={`${teamMetrics.reviewed}/${teamMetrics.total} athletes reviewed`}
                 color={teamMetrics.avg>=4?'var(--green)':teamMetrics.avg>=3?'var(--amber)':'var(--red)'}
               />
               <MetricCard
-                label="OKR Progress (company)"
+                label="OKR Progress (current)"
                 icon={<Target size={12}/>}
                 value={`${okrMetrics.overallOKR}%`}
                 sub={`${okrMetrics.doneInits}/${okrMetrics.totalInits} initiatives done`}
@@ -378,36 +389,47 @@ export default function Analytics() {
                 label="Clients At Risk"
                 icon={<AlertTriangle size={12}/>}
                 value={healthMetrics.atRisk.length}
-                sub={healthMetrics.atRisk.length>0?'Needs attention this week':'All clients healthy'}
+                sub={healthMetrics.atRisk.length>0?'Latest reviews in selected period':healthMetrics.totalTracked?'No reviewed clients below 3.0':'No client reviews in this period'}
                 color={healthMetrics.atRisk.length>0?'var(--red)':'var(--green)'}
               />
             </div>
 
             {/* ═══ SPEND TRENDS ═══ */}
-            <div style={{display:'grid',gridTemplateColumns:'2fr 1fr',gap:16,marginBottom:24}}>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(min(100%,360px),1fr))',gap:16,marginBottom:24}}>
               <div className="card" style={{padding:'16px 18px'}}>
-                <Section title="Spend Trend" subtitle="Total ad spend and DDU creative spend over time">
+                <Section title="Spend Trend" subtitle={`${period.label} · grouped by ${grain}`} action={
+                  <div role="group" aria-label="Spend trend grouping" style={{display:'flex',border:'1px solid var(--border)',borderRadius:6,overflow:'hidden'}}>
+                    {['week','month','year'].map(value=><button key={value} aria-pressed={grain===value} onClick={()=>setGrain(value)} style={{padding:'5px 10px',border:'none',cursor:'pointer',fontSize:11,fontWeight:600,background:grain===value?'var(--accent)':'transparent',color:grain===value?'#fff':'var(--text-secondary)'}}>{value[0].toUpperCase()+value.slice(1)}</button>)}
+                  </div>
+                }>
+                  {spendMetrics.entryCount===0?(
+                    <div style={{padding:'65px 12px',textAlign:'center',fontSize:12,color:'var(--text-muted)'}}>No spend entries recorded for {period.label.toLowerCase()}.</div>
+                  ):(
                   <div style={{height:220}}>
                     <ResponsiveContainer>
-                      <BarChart data={spendMetrics.perWeek} margin={{top:5,right:5,bottom:0,left:0}}>
+                      <BarChart data={spendMetrics.buckets} margin={{top:5,right:5,bottom:0,left:0}}>
                         <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
-                        <XAxis dataKey="week" stroke="var(--text-muted)" fontSize={10} tickLine={false}/>
+                        <XAxis dataKey="label" stroke="var(--text-muted)" fontSize={10} tickLine={false} minTickGap={25}/>
                         <YAxis stroke="var(--text-muted)" fontSize={10} tickLine={false} axisLine={false} tickFormatter={v=>fmtMoney(v)}/>
                         <Tooltip
                           contentStyle={{background:'var(--bg-card)',border:'1px solid var(--border)',borderRadius:8,fontSize:11}}
-                          formatter={v=>fmtMoney(v)}
+                          formatter={value=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(value)}
+                          labelFormatter={(label,payload)=>payload?.[0]?.payload?.fullLabel||label}
                         />
+                        <Legend wrapperStyle={{fontSize:11}}/>
                         <Bar dataKey="total" fill="var(--border)" name="Total Spend" radius={[3,3,0,0]}/>
                         <Bar dataKey="ddu" fill="var(--accent)" name="DDU Creative" radius={[3,3,0,0]}/>
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
+                  )}
+                  <p style={{fontSize:10,color:'var(--text-muted)',marginTop:10}}>Weekly entries are assigned to their week-start date. Blank periods have no recorded entries; the first and last periods may be partial.</p>
                 </Section>
               </div>
               <div className="card" style={{padding:'16px 18px'}}>
-                <Section title="Platform Mix" subtitle="Last week's spend by platform">
+                <Section title="Platform Mix" subtitle={`${period.label} · spend by platform`}>
                   {platformMix.length===0 ? (
-                    <div style={{padding:'40px 0',textAlign:'center',fontSize:12,color:'var(--text-muted)'}}>No spend data logged yet</div>
+                    <div style={{padding:'40px 0',textAlign:'center',fontSize:12,color:'var(--text-muted)'}}>No platform spend recorded in this period</div>
                   ) : (
                     <div style={{height:220,display:'flex',alignItems:'center'}}>
                       <div style={{flex:1,height:'100%'}}>
@@ -434,12 +456,15 @@ export default function Analytics() {
               </div>
             </div>
 
+            <ChurnTenureAnalysis clients={allClients} records={records} period={period}/>
+
             {/* ═══ CLIENT HEALTH ═══ */}
+            <p style={{fontSize:11,color:'var(--text-muted)',marginBottom:12}}>Client and team health show the latest review in {period.dateLabel}, using the current roster.</p>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:24}}>
               <div className="card" style={{padding:'16px 18px'}}>
                 <Section title="Clients at Risk" subtitle={`${healthMetrics.atRisk.length} clients scoring below 3.0`}>
                   {healthMetrics.atRisk.length===0 ? (
-                    <div style={{padding:'30px 0',textAlign:'center',fontSize:12,color:'var(--green)'}}>All clients healthy — keep it up</div>
+                    <div style={{padding:'30px 0',textAlign:'center',fontSize:12,color:'var(--text-muted)'}}>{healthMetrics.totalTracked?'No reviewed clients below 3.0':'No client reviews in this period'}</div>
                   ) : (
                     <div style={{display:'flex',flexDirection:'column',gap:6,maxHeight:240,overflowY:'auto'}}>
                       {healthMetrics.atRisk.map(c=>(
@@ -500,7 +525,7 @@ export default function Analytics() {
               <div className="card" style={{padding:'16px 18px'}}>
                 <Section title="Top Performers" subtitle="Highest-rated athletes by latest review">
                   {teamMetrics.topPerformers.length===0 ? (
-                    <div style={{padding:'30px 0',textAlign:'center',fontSize:12,color:'var(--text-muted)'}}>No reviews logged yet</div>
+                    <div style={{padding:'30px 0',textAlign:'center',fontSize:12,color:'var(--text-muted)'}}>No team reviews in this period</div>
                   ) : (
                     <div style={{display:'flex',flexDirection:'column',gap:6,maxHeight:240,overflowY:'auto'}}>
                       {teamMetrics.topPerformers.map((a,i)=>(
@@ -523,7 +548,7 @@ export default function Analytics() {
 
             {/* ═══ OKR PROGRESS ═══ */}
             <div className="card" style={{padding:'16px 18px',marginBottom:24}}>
-              <Section title="OKR Progress by Team" subtitle="Average initiative completion per team">
+              <Section title="OKR Progress by Team" subtitle="Current snapshot · average initiative completion per team">
                 {okrMetrics.byTeam.length===0 ? (
                   <div style={{padding:'30px 0',textAlign:'center',fontSize:12,color:'var(--text-muted)'}}>No team objectives this quarter</div>
                 ) : (
@@ -551,7 +576,7 @@ export default function Analytics() {
             {/* ═══ ONBOARDING HEALTH ═══ */}
             <div style={{display:'grid',gridTemplateColumns:'1fr 2fr',gap:16,marginBottom:24}}>
               <div className="card" style={{padding:'16px 18px'}}>
-                <Section title="Onboarding Completion" subtitle="Active clients with checklists">
+                <Section title="Onboarding Completion" subtitle="Current snapshot · active clients with checklists">
                   <div style={{textAlign:'center',padding:'20px 0'}}>
                     <div style={{fontFamily:'var(--font-display)',fontSize:42,fontWeight:800,letterSpacing:'-0.04em',color:onboardingMetrics.avgCompletion>=70?'var(--green)':onboardingMetrics.avgCompletion>=40?'var(--amber)':'var(--red)'}}>
                       {Math.round(onboardingMetrics.avgCompletion)}%
@@ -562,7 +587,7 @@ export default function Analytics() {
                 </Section>
               </div>
               <div className="card" style={{padding:'16px 18px'}}>
-                <Section title="Stuck Onboardings" subtitle="Clients below 50% with 5+ items">
+                <Section title="Stuck Onboardings" subtitle="Current snapshot · clients below 50% with 5+ items">
                   {onboardingMetrics.stuck.length===0 ? (
                     <div style={{padding:'30px 0',textAlign:'center',fontSize:12,color:'var(--green)'}}>No stuck onboardings</div>
                   ) : (
@@ -586,14 +611,14 @@ export default function Analytics() {
 
             {/* ═══ ACTIVITY VOLUME ═══ */}
             <div className="card" style={{padding:'16px 18px',marginBottom:24}}>
-              <Section title="Team Activity" subtitle="Change log entries per week — operational rhythm">
+              <Section title="Team Activity" subtitle={`${period.label} · change log entries by ${grain}`}>
                 <div style={{height:140}}>
                   <ResponsiveContainer>
-                    <BarChart data={activityByWeek}>
+                    <BarChart data={activityByPeriod}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
-                      <XAxis dataKey="week" stroke="var(--text-muted)" fontSize={10} tickLine={false}/>
+                      <XAxis dataKey="label" stroke="var(--text-muted)" fontSize={10} tickLine={false} minTickGap={25}/>
                       <YAxis stroke="var(--text-muted)" fontSize={10} tickLine={false} axisLine={false}/>
-                      <Tooltip contentStyle={{background:'var(--bg-card)',border:'1px solid var(--border)',borderRadius:8,fontSize:11}}/>
+                      <Tooltip labelFormatter={(label,payload)=>payload?.[0]?.payload?.fullLabel||label} contentStyle={{background:'var(--bg-card)',border:'1px solid var(--border)',borderRadius:8,fontSize:11}}/>
                       <Bar dataKey="entries" fill="var(--accent)" radius={[3,3,0,0]}/>
                     </BarChart>
                   </ResponsiveContainer>
