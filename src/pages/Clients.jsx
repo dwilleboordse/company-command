@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
+import { packageFormValues, packagePayload, validateClientPackage } from '../lib/clientPackage'
+import ClientPackageFields from '../components/ClientPackageFields'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, RadarChart, Radar, PolarGrid, PolarAngleAxis } from 'recharts'
 import { Plus, Edit2, Trash2, ChevronDown, ChevronUp, TrendingDown, TrendingUp, Minus, Check, X } from 'lucide-react'
 
@@ -338,22 +340,43 @@ function ClientCard({ client, latestEntry, history, onEdit, onDelete, isManageme
 
 // ── ADD CLIENT ───────────────────────────────────────────────
 function AddClientModal({ onClose, onSave }) {
-  const [name, setName] = useState('')
+  const [form, setForm] = useState(() => ({ name:'', ...packageFormValues() }))
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
   async function handleSave() {
-    if (!name.trim()) return; setSaving(true)
-    await supabase.from('clients').insert({ name: name.trim() })
-    onSave(); setSaving(false); onClose()
+    if (saving) return
+    const validationError = !form.name.trim() ? 'Enter a client name.' : validateClientPackage(form, { requirePackage: true })
+    if (validationError) { setError(validationError); return }
+    setError('')
+    setSaving(true)
+    try {
+      const { data, error: saveError } = await supabase.from('clients').insert({
+        name: form.name.trim(),
+        ...packagePayload(form),
+        is_active:true,
+        is_archived:false,
+      }).select('id').single()
+      if (saveError) throw saveError
+      if (!data?.id) throw new Error('The client could not be created. Please ask the CEO to check your client editing permissions.')
+      onSave()
+      onClose()
+    } catch (saveError) {
+      setError('Save failed: ' + saveError.message)
+    } finally {
+      setSaving(false)
+    }
   }
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e=>e.stopPropagation()}>
+      <div className="modal" style={{maxWidth:580}} onClick={e=>e.stopPropagation()}>
         <h2 className="modal-title">Add Client</h2>
-        <div className="form-group"><label>Client Name</label>
-          <input value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleSave()} placeholder="e.g. Abriga" autoFocus/>
+        <div className="form-group"><label htmlFor="health-client-name">Client Name *</label>
+          <input id="health-client-name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="e.g. Abriga" autoFocus required/>
         </div>
+        <ClientPackageFields value={form} onChange={setForm} requirePackage showConcepts/>
+        {error && <p role="alert" style={{color:'var(--red)',fontSize:12,marginTop:12}}>{error}</p>}
         <div className="flex gap-2 mt-4">
-          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>{saving?'Adding...':'Add'}</button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving||!form.name.trim()}>{saving?'Adding...':'Add'}</button>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
         </div>
       </div>

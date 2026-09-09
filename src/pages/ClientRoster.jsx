@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
-import { Plus, Search, Archive, Edit2, LayoutGrid, LayoutList, ChevronDown, ChevronUp } from 'lucide-react'
+import { formatCreatorTarget, packageFormValues, packagePayload, validateClientPackage } from '../lib/clientPackage'
+import ClientPackageFields from '../components/ClientPackageFields'
+import { Plus, Search, Archive, Edit2, LayoutGrid, LayoutList } from 'lucide-react'
 
 function parseIds(val) {
   if (!val) return []
@@ -114,42 +116,37 @@ function MultiSelect({ label, ids, members, onChange, color }) {
 // ── CLIENT MODAL (Add/Edit) ──────────────────────────────────
 function ClientModal({ client, allMembers, onClose, onSave }) {
   const isEdit = !!client
-  const blank = {name:'',package_type:'',
+  const blank = {name:'',...packageFormValues(),
     cs_ids:[],mb_ids:[],editor_ids:[],designer_ids:[],ugc_ids:[],
-    channels:{meta:false,google:false,tiktok:false,snapchat:false,applovin:false},
-    creatives:{video:{concepts:0,variations:0},ugc:{concepts:0,variations:0},static:{concepts:0,variations:0}}}
+    channels:{meta:false,google:false,tiktok:false,snapchat:false,applovin:false}}
 
   const [form, setForm] = useState(isEdit ? {
     name: client.name||'',
-    package_type: client.package_type||'',
+    ...packageFormValues(client),
     cs_ids: parseIds(client.cs_ids),
     mb_ids: parseIds(client.mb_ids),
     editor_ids: parseIds(client.editor_ids),
     designer_ids: parseIds(client.designer_ids),
     ugc_ids: parseIds(client.ugc_ids),
     channels: client.channels||{meta:false,google:false,tiktok:false,snapchat:false,applovin:false},
-    creatives: client.creatives||{video:{concepts:0,variations:0},ugc:{concepts:0,variations:0},static:{concepts:0,variations:0}},
   } : blank)
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
-  function setCreative(type, field, val) {
-    setForm(f=>({...f,creatives:{...f.creatives,[type]:{...f.creatives[type],[field]:parseInt(val)||0}}}))
-  }
   function toggleChannel(ch) {
     setForm(f=>({...f,channels:{...f.channels,[ch]:!f.channels[ch]}}))
   }
-  function totalAds(type) {
-    const t = form.creatives[type]
-    return (parseInt(t.concepts)||0) * (parseInt(t.variations)||0)
-  }
 
   async function handleSave() {
-    if (!form.name.trim()) return
+    if (saving) return
+    const validationError = !form.name.trim() ? 'Enter a client name.' : validateClientPackage(form, { requirePackage: !isEdit })
+    if (validationError) { setError(validationError); return }
+    setError('')
     setSaving(true)
     // Build payload without updated_at (may not exist on all schemas)
     const payload = {
       name: form.name.trim(),
-      package_type: form.package_type||'',
+      ...packagePayload(form),
       cs_ids: form.cs_ids,
       mb_ids: form.mb_ids,
       editor_ids: form.editor_ids,
@@ -157,33 +154,21 @@ function ClientModal({ client, allMembers, onClose, onSave }) {
       ugc_ids: form.ugc_ids,
       assigned_cs_id: form.cs_ids[0]||null,
       channels: form.channels,
-      creatives: form.creatives,
     }
-    if (isEdit) {
-      const {data: savedClient, error: saveError} = await supabase
-        .from('clients')
-        .update(payload)
-        .eq('id', client.id)
-        .select()
-      if (saveError) {
-        alert('Save failed: ' + saveError.message)
-        setSaving(false)
-        return
-      }
-      if (!savedClient || savedClient.length === 0) {
-        alert('Save did not apply — your account may not have permission to edit clients. Ask the CEO to check RLS policies for the clients table.')
-        setSaving(false)
-        return
-      }
-    } else {
-      const {data:newClient, error} = await supabase.from('clients')
-        .insert({...payload, is_active:true, is_archived:false}).select().single()
-      if (error) {
-        alert('Save failed: ' + error.message)
-        setSaving(false)
-        return
-      }
-      if (newClient?.id) {
+    try {
+      if (isEdit) {
+        const {data: savedClient, error: saveError} = await supabase
+          .from('clients')
+          .update(payload)
+          .eq('id', client.id)
+          .select()
+        if (saveError) throw saveError
+        if (!savedClient?.length) throw new Error('The client could not be saved. Please ask the CEO to check your client editing permissions.')
+      } else {
+        const {data:newClient, error: saveError} = await supabase.from('clients')
+          .insert({...payload, is_active:true, is_archived:false}).select().single()
+        if (saveError) throw saveError
+        if (!newClient?.id) throw new Error('The client could not be created. Please ask the CEO to check your client editing permissions.')
         const weekStart = new Date()
         weekStart.setDate(weekStart.getDate()-weekStart.getDay()+1)
         const ws = weekStart.toISOString().split('T')[0]
@@ -193,10 +178,13 @@ function ClientModal({ client, allMembers, onClose, onSave }) {
           strategic_alignment:0, communication:0
         },{onConflict:'client_id,week_start'})
       }
+      onSave()
+      onClose()
+    } catch (saveError) {
+      setError('Save failed: ' + saveError.message)
+    } finally {
+      setSaving(false)
     }
-    setSaving(false)
-    onSave()
-    onClose()
   }
 
   const membersFor = (position) => allMembers.filter(m=>m.position===position)
@@ -206,17 +194,12 @@ function ClientModal({ client, allMembers, onClose, onSave }) {
       <div className="modal" style={{maxWidth:580}} onClick={e=>e.stopPropagation()}>
         <h2 className="modal-title">{isEdit?'Edit Client':'Add Client'}</h2>
 
-        {/* Name + Package */}
-        <div className="grid-2">
-          <div className="form-group">
-            <label>Client Name *</label>
-            <input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="e.g. Abriga" autoFocus/>
-          </div>
-          <div className="form-group">
-            <label>Package Type</label>
-            <input value={form.package_type} onChange={e=>setForm({...form,package_type:e.target.value})} placeholder="e.g. Full Service, Ads Only"/>
-          </div>
+        <div className="form-group">
+          <label htmlFor="roster-client-name">Client Name *</label>
+          <input id="roster-client-name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="e.g. Abriga" autoFocus required/>
         </div>
+
+        <ClientPackageFields value={form} onChange={setForm} requirePackage={!isEdit} showConcepts/>
 
         {/* Channels */}
         <div className="form-group">
@@ -237,42 +220,6 @@ function ClientModal({ client, allMembers, onClose, onSave }) {
           </div>
         </div>
 
-        {/* Creative Package */}
-        <div className="form-group">
-          <label>Creative Package</label>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10,marginTop:4}}>
-            {['video','ugc','static'].map(type=>{
-              const total = totalAds(type)
-              return (
-                <div key={type} style={{background:'var(--bg)',border:'1px solid var(--border)',
-                  borderRadius:'var(--radius)',padding:10}}>
-                  <div style={{fontSize:10,fontFamily:'var(--font-mono)',color:'var(--text-muted)',
-                    textTransform:'uppercase',letterSpacing:1,marginBottom:8,fontWeight:600}}>
-                    {type==='ugc'?'UGC':type==='video'?'Video':'Static'}
-                  </div>
-                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6}}>
-                    <div>
-                      <div style={{fontSize:9,color:'var(--text-muted)',marginBottom:3}}>Concepts</div>
-                      <input type="number" min="0" value={form.creatives[type].concepts}
-                        onChange={e=>setCreative(type,'concepts',e.target.value)}
-                        style={{padding:'4px 8px',fontSize:12}}/>
-                    </div>
-                    <div>
-                      <div style={{fontSize:9,color:'var(--text-muted)',marginBottom:3}}>Variations</div>
-                      <input type="number" min="0" value={form.creatives[type].variations}
-                        onChange={e=>setCreative(type,'variations',e.target.value)}
-                        style={{padding:'4px 8px',fontSize:12}}/>
-                    </div>
-                  </div>
-                  <div style={{marginTop:6,fontSize:11,color:'var(--accent)',fontWeight:600,textAlign:'center'}}>
-                    = {total} total {type==='ugc'?'UGC':type==='video'?'videos':'statics'}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-
         {/* Team Assignment */}
         <div className="form-group">
           <label>Team Assignment</label>
@@ -286,6 +233,7 @@ function ClientModal({ client, allMembers, onClose, onSave }) {
           </div>
         </div>
 
+        {error && <p role="alert" style={{color:'var(--red)',fontSize:12,marginTop:12}}>{error}</p>}
         <div className="flex gap-2 mt-4">
           <button className="btn btn-primary" onClick={handleSave} disabled={saving||!form.name.trim()}>
             {saving?'Saving...':isEdit?'Save Changes':'Add Client'}
@@ -389,6 +337,14 @@ function ClientCard({ client, allMembers, onEdit, onArchive }) {
         </div>
       )}
 
+      <div style={{padding:'8px 16px',borderBottom:'1px solid var(--border)'}}>
+        <div style={{fontSize:9,fontFamily:'var(--font-mono)',color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:1,fontWeight:600,marginBottom:6}}>Creators to source / month</div>
+        <div style={{display:'flex',gap:16,flexWrap:'wrap',fontSize:12}}>
+          <span>UGC: <strong>{formatCreatorTarget(client.ugc_creators_per_month)}</strong></span>
+          <span>Seeding: <strong>{formatCreatorTarget(client.seeding_creators_per_month)}</strong></span>
+        </div>
+      </div>
+
       {/* Team */}
       <div style={{padding:'10px 16px',flex:1,display:'flex',flexDirection:'column',gap:8}}>
         {ROLE_GROUPS.map(rg=>{
@@ -448,6 +404,10 @@ function ClientTableRow({ client, allMembers, onEdit, onArchive }) {
       </td>
       <td style={{fontSize:12}}>
         {totalAds>0?<span style={{fontWeight:600,color:'var(--accent)'}}>{totalAds}/mo</span>:<span style={{color:'var(--text-muted)'}}>—</span>}
+      </td>
+      <td style={{fontSize:11,whiteSpace:'nowrap'}}>
+        <div>UGC: {formatCreatorTarget(client.ugc_creators_per_month)}</div>
+        <div>Seeding: {formatCreatorTarget(client.seeding_creators_per_month)}</div>
       </td>
       {ROLE_GROUPS.map(rg=>{
         const ids = parseIds(client[rg.key])
@@ -641,6 +601,7 @@ export default function ClientRoster() {
                     <th>Client</th>
                     <th>Channels</th>
                     <th>Monthly Ads</th>
+                    <th>Creators to source / month</th>
                     {ROLE_GROUPS.map(rg=><th key={rg.key} style={{color:rg.color}}>{rg.label}</th>)}
                     <th></th>
                   </tr>

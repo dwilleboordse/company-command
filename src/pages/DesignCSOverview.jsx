@@ -4,12 +4,15 @@ import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { loadDesignCsData, persistVirtualPeople } from '../lib/designCsData'
 import { buildAllocationSnapshot, buildRosterAllocations, buildWorkloads, formatMonth, initials, nextMonthStart, parseIds, roleLabel, statusMeta } from '../lib/workforcePlanning'
+import ClientPackageFields from '../components/ClientPackageFields'
+import { formatCreatorTarget, packageFormValues, packagePayload, validateClientPackage } from '../lib/clientPackage'
 import './WorkforcePlanning.css'
 
 const WORKLOAD_DRAG_MIME = 'application/x-company-command-client'
 
 function createEmptyAllocationForm() {
   return {
+    ...packageFormValues(),
     client_id: '',
     client_name: '',
     strategist_profile_ids: [],
@@ -46,17 +49,20 @@ function CapacityBar({ utilization, status }) {
 
 function WorkloadClientBreakdown({ assignments, showConcepts, type, canDrag, onSelect, onDragStart, onDragEnd }) {
   const sortedAssignments = [...assignments].sort((a, b) => a.client_name_snapshot.localeCompare(b.client_name_snapshot))
+  const showCreatorTargets = type === 'ugc_manager'
 
   if (!sortedAssignments.length) return <div className="workload-client-empty">No clients assigned</div>
 
   return (
     <div className="workload-client-table-wrap">
-      <table className={`workload-client-table ${showConcepts ? '' : 'clients-only'}`}>
+      <table className={`workload-client-table ${showCreatorTargets ? 'creator-targets' : showConcepts ? '' : 'clients-only'}`}>
         <thead>
           <tr>
             <th>Client</th>
             {showConcepts && <th>Static</th>}
             {showConcepts && <th>Video</th>}
+            {showCreatorTargets && <th>UGC creators</th>}
+            {showCreatorTargets && <th>Seeding creators</th>}
           </tr>
         </thead>
         <tbody>
@@ -83,13 +89,17 @@ function WorkloadClientBreakdown({ assignments, showConcepts, type, canDrag, onS
                     <span>{item.client_name_snapshot}</span>
                   </button>
                 ) : <span className="workload-client-name">{item.client_name_snapshot}</span>}
+                {showCreatorTargets && (item.ugc_manager_keys || []).length > 1 && <span className="workload-shared-target">Shared client target</span>}
               </td>
               {showConcepts && <td><strong>{formatConcepts(item.statics || 0)}</strong></td>}
               {showConcepts && <td><strong>{formatConcepts(item.videos || 0)}</strong></td>}
+              {showCreatorTargets && <td><strong>{formatCreatorTarget(item.ugc_creators_per_month)}</strong></td>}
+              {showCreatorTargets && <td><strong>{formatCreatorTarget(item.seeding_creators_per_month)}</strong></td>}
             </tr>
           ))}
         </tbody>
       </table>
+      {showCreatorTargets && <p className="workload-target-note">Creators to source per month. Shared client targets are shown in full.</p>}
     </div>
   )
 }
@@ -177,7 +187,7 @@ function WorkloadSection({ title, subtitle, people, allocations, type, draggedRo
     if (type === 'creative_strategist') return !(item.strategist_keys?.length || item.strategist_key)
     if (type === 'editor') return Number(item.videos || 0) > 0 && !(item.editor_keys || []).length
     if (type === 'designer') return Number(item.statics || 0) > 0 && !(item.designer_keys || []).length
-    return Number(item.ugc_concepts || 0) > 0 && !(item.ugc_manager_keys || []).length
+    return (Number(item.ugc_concepts || 0) > 0 || Number(item.ugc_creators_per_month || 0) > 0 || Number(item.seeding_creators_per_month || 0) > 0) && !(item.ugc_manager_keys || []).length
   }) : []
   return (
     <section className="planning-section">
@@ -235,6 +245,7 @@ function MultiChecks({ label, options, value, onChange }) {
 function AllocationModal({ allocation, monthStart, clients, people, onClose, onSaved }) {
   const isEdit = Boolean(allocation)
   const [form, setForm] = useState(allocation ? {
+    ...packageFormValues(clients.find(client => client.id === allocation.client_id) || allocation),
     client_id: allocation.client_id || '',
     client_name: allocation.client_name_snapshot || '',
     strategist_profile_ids: allocation.strategist_profile_ids || [],
@@ -252,6 +263,7 @@ function AllocationModal({ allocation, monthStart, clients, people, onClose, onS
 
   async function save(event) {
     event.preventDefault()
+    if (saving) return
     const client = isEdit ? clients.find(item => item.id === form.client_id) : null
     const clientName = form.client_name.trim()
     if (isEdit && !client) return
@@ -261,6 +273,18 @@ function AllocationModal({ allocation, monthStart, clients, people, onClose, onS
     }
     if (!isEdit && clients.some(item => item.name?.trim().toLowerCase() === clientName.toLowerCase())) {
       setError('That client already exists in the Client Roster. Edit or reactivate the existing client instead.')
+      return
+    }
+    const packageError = validateClientPackage({
+      ...form,
+      creatives: {
+        static: { concepts: form.statics },
+        video: { concepts: form.video_concepts },
+        ugc: { concepts: form.ugc_concepts },
+      },
+    }, { requirePackage: !isEdit })
+    if (packageError) {
+      setError(packageError)
       return
     }
     setSaving(true)
@@ -275,6 +299,7 @@ function AllocationModal({ allocation, monthStart, clients, people, onClose, onS
       await persistVirtualPeople(people.filter(person => selectedProfileIds.includes(person.profile_id)))
       const currentCreatives = client?.creatives || {}
       const payload = {
+        ...packagePayload(form),
         cs_ids: form.strategist_profile_ids,
         assigned_cs_id: form.strategist_profile_ids[0] || null,
         designer_ids: form.designer_profile_ids,
@@ -328,12 +353,14 @@ function AllocationModal({ allocation, monthStart, clients, people, onClose, onS
           <input value={form.client_name} onChange={event => setForm(current => ({ ...current, client_name: event.target.value }))} placeholder="Client name" required autoFocus/>
         )}
 
+        <ClientPackageFields value={form} onChange={value => setForm(current => ({ ...current, ...value }))} requirePackage={!isEdit} showConcepts={false}/>
+
         <MultiChecks label="Creative strategists" options={optionsFor('creative_strategist')} value={form.strategist_profile_ids} onChange={strategist_profile_ids => setForm(current => ({ ...current, strategist_profile_ids }))}/>
 
         <div className="planning-form-grid">
-          <label><span>Static concepts</span><input type="number" min="0" value={form.statics} onChange={event => setForm(current => ({ ...current, statics: event.target.value }))}/></label>
-          <label><span>Video concepts</span><input type="number" min="0" value={form.video_concepts} onChange={event => setForm(current => ({ ...current, video_concepts: event.target.value }))}/></label>
-          <label><span>UGC video concepts</span><input type="number" min="0" value={form.ugc_concepts} onChange={event => setForm(current => ({ ...current, ugc_concepts: event.target.value }))}/></label>
+          <label><span>Static concepts</span><input type="number" min="0" step="1" max="2147483647" value={form.statics} onChange={event => setForm(current => ({ ...current, statics: event.target.value }))}/></label>
+          <label><span>Video concepts</span><input type="number" min="0" step="1" max="2147483647" value={form.video_concepts} onChange={event => setForm(current => ({ ...current, video_concepts: event.target.value }))}/></label>
+          <label><span>UGC video concepts</span><input type="number" min="0" step="1" max="2147483647" value={form.ugc_concepts} onChange={event => setForm(current => ({ ...current, ugc_concepts: event.target.value }))}/></label>
         </div>
 
         <MultiChecks label="Designers" options={optionsFor('designer')} value={form.designer_profile_ids} onChange={designer_profile_ids => setForm(current => ({ ...current, designer_profile_ids }))}/>
@@ -354,8 +381,8 @@ function AllocationTable({ allocations, peopleByKey, onEdit, isLive }) {
   return (
     <div className="card planning-table-card">
       <div className="table-wrap">
-        <table className="planning-table">
-          <thead><tr><th>Client</th><th>Strategist</th><th>Concepts</th><th>Designers</th><th>Editors</th><th>UGC</th><th></th></tr></thead>
+        <table className="planning-table planning-allocation-table">
+          <thead><tr><th>Client</th><th>Strategist</th><th>Concepts</th><th>UGC creators / month</th><th>Seeding creators / month</th><th>Designers</th><th>Editors</th><th>UGC managers</th><th></th></tr></thead>
           <tbody>
             {allocations.map(item => {
               const strategistKeys = item.strategist_keys?.length ? item.strategist_keys : item.strategist_key ? [item.strategist_key] : []
@@ -365,9 +392,11 @@ function AllocationTable({ allocations, peopleByKey, onEdit, isLive }) {
               const ugc = (item.ugc_manager_keys || []).map(key => peopleByKey.get(key)?.display_name || 'Legacy').join(', ')
               return (
                 <tr key={item.id}>
-                  <td><strong>{item.client_name_snapshot}</strong>{!item.client_id && <span className="legacy-label">Legacy match needed</span>}</td>
+                  <td><strong>{item.client_name_snapshot}</strong><span className="table-subline">{item.package_type || 'Package not set'}</span>{!item.client_id && <span className="legacy-label">Legacy match needed</span>}</td>
                   <td>{strategists || 'Unassigned'}</td>
                   <td><strong>{formatConcepts(Number(item.statics || 0) + Number(item.videos || 0))}</strong><span className="table-subline">{formatConcepts(item.statics)} static · {formatConcepts(item.videos)} video</span></td>
+                  <td>{formatCreatorTarget(item.ugc_creators_per_month)}</td>
+                  <td>{formatCreatorTarget(item.seeding_creators_per_month)}</td>
                   <td>{designers || '—'}</td>
                   <td>{editors || '—'}</td>
                   <td>{ugc || '—'}</td>
@@ -379,7 +408,7 @@ function AllocationTable({ allocations, peopleByKey, onEdit, isLive }) {
                 </tr>
               )
             })}
-            {!allocations.length && <tr><td colSpan="7"><div className="empty-state"><p>No client workload has been entered for this month.</p></div></td></tr>}
+            {!allocations.length && <tr><td colSpan="9"><div className="empty-state"><p>No client workload has been entered for this month.</p></div></td></tr>}
           </tbody>
         </table>
       </div>

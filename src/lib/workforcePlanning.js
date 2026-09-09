@@ -63,6 +63,9 @@ export function buildRosterAllocations({ clients = [], people = [], monthStart =
         source_key: `roster:${client.id}`,
         client_id: client.id,
         client_name_snapshot: client.name,
+        package_type: client.package_type || '',
+        ugc_creators_per_month: client.ugc_creators_per_month ?? null,
+        seeding_creators_per_month: client.seeding_creators_per_month ?? null,
         strategist_key: strategistKeys[0] || null,
         strategist_keys: strategistKeys,
         strategist_profile_ids: strategistProfileIds,
@@ -89,6 +92,9 @@ export function buildAllocationSnapshot(allocations = []) {
     source_key: item.source_key,
     client_id: item.client_id || null,
     client_name_snapshot: item.client_name_snapshot,
+    package_type: item.package_type ?? null,
+    ugc_creators_per_month: item.ugc_creators_per_month ?? null,
+    seeding_creators_per_month: item.seeding_creators_per_month ?? null,
     strategist_key: item.strategist_key || null,
     strategist_keys: item.strategist_keys?.length
       ? item.strategist_keys
