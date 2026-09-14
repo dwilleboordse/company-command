@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { getClientStrategistIds } from '../lib/clientAssignments'
-import { countsAsCompletedPlanReview } from '../lib/planReview'
-import { isCompleteSpendEntry } from '../lib/spendAnalytics'
+import { countsAsCompletedPlanReview, planWeekStart } from '../lib/planReview'
+import { isCompleteSpendEntry, lastCompletedSpendWeek } from '../lib/spendAnalytics'
 import { ChevronLeft, ChevronRight, Check, Minus } from 'lucide-react'
 import './Accountability.css'
 
@@ -54,19 +54,13 @@ function parseISODate(str) {
   const [y, m, d] = str.split('-').map(Number)
   return new Date(y, m - 1, d)
 }
-function getMondayOfWeek(d) {
-  const day = d.getDay(); const diff = day === 0 ? -6 : 1 - day
-  const m = new Date(d); m.setDate(m.getDate() + diff); m.setHours(0, 0, 0, 0); return m
-}
 function getLastMonday() {
-  const d = new Date(); const day = d.getDay()
-  const diff = day === 0 ? 13 : day + 6
-  d.setDate(d.getDate() - diff); d.setHours(0, 0, 0, 0); return d
+  return parseISODate(lastCompletedSpendWeek())
 }
 function addWeeks(d, n) { const r = new Date(d); r.setDate(r.getDate() + n * 7); return r }
 // Only true for weeks strictly after the current week (the current week is fine — that's what we log during)
 function isFutureWeek(dateStr) {
-  return dateStr > toDateStr(getMondayOfWeek(new Date()))
+  return dateStr > planWeekStart()
 }
 // "First week of the month" = the Monday of that week falls in days 1–7
 function isFirstWeekOfMonth(mondayStr) {
@@ -271,7 +265,7 @@ export default function Accountability() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(null)
   // Default to the CURRENT week — team logs during the week, not after
-  const [selectedWeek, setSelectedWeek] = useState(() => toDateStr(getMondayOfWeek(new Date())))
+  const [selectedWeek, setSelectedWeek] = useState(() => planWeekStart())
 
   const monthlyVisible = isFirstWeekOfMonth(selectedWeek)
 
@@ -350,7 +344,7 @@ export default function Accountability() {
     if (!isFutureWeek(next)) setSelectedWeek(next)
   }
   const canGoNext = !isFutureWeek(toDateStr(addWeeks(parseISODate(selectedWeek), 1)))
-  const thisWeekStr = toDateStr(getMondayOfWeek(new Date()))
+  const thisWeekStr = planWeekStart()
   const lastWeekStr = toDateStr(getLastMonday())
   const isThisWeek  = selectedWeek === thisWeekStr
   const isLastWeek  = selectedWeek === lastWeekStr

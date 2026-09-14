@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildDashboardOkrs, canViewOkr, currentOkrQuarter, getOkrMeasurement, parseOkrAssignees } from './dashboardOkrs.js'
+import { buildDashboardOkrs, buildOkrCurrentValuePatch, canViewOkr, currentOkrQuarter, getOkrMeasurement, okrCurrentValueInput, parseOkrAssignees } from './dashboardOkrs.js'
 
 const profile = { id: 'me', position: 'creative_strategist', department: 'delivery' }
 const objectives = [
@@ -54,7 +54,7 @@ test('CEO department and company views use shared values without personal owners
   assert.equal(buildDashboardOkrs({ objectives, keyResults, profile: ceo, isCEO: true, scope: 'company' }).length, 1)
 })
 
-test('official zero beats stale weekly values; legacy fallback is owner/date scoped', () => {
+test('confirmed official zero beats stale weekly values; legacy fallback is owner/date scoped', () => {
   const values = [
     { key_result_id: 'kr', user_id: 'other', value: 500, week_start: '2026-09-14' },
     { key_result_id: 'kr', user_id: 'me', value: 90, week_start: '2026-10-01' },
@@ -62,7 +62,7 @@ test('official zero beats stale weekly values; legacy fallback is owner/date sco
     { key_result_id: 'kr', user_id: 'me', value: 20, week_start: '2026-08-31' },
   ]
   const options = { values, userId: 'me', personal: true, asOf: '2026-09-14' }
-  assert.equal(getOkrMeasurement({ id: 'kr', current_value: 0, goal_value: 100 }, options).current, 0)
+  assert.equal(getOkrMeasurement({ id: 'kr', current_value: 0, current_value_recorded_at: '2026-09-14T10:00:00Z', goal_value: 100 }, options).current, 0)
   const fallback = getOkrMeasurement({ id: 'kr', current_value: null, goal_value: 100 }, options)
   assert.equal(fallback.current, 30)
   assert.equal(fallback.valueDate, '2026-09-07')
@@ -70,11 +70,68 @@ test('official zero beats stale weekly values; legacy fallback is owner/date sco
 })
 
 test('min/zero/negative targets and missing measurements do not divide by zero', () => {
-  assert.equal(getOkrMeasurement({ current_value: 0, goal_value: 0, goal_direction: 'min' }).met, true)
+  assert.equal(getOkrMeasurement({ current_value: 0, current_value_recorded_at: '2026-09-14T10:00:00Z', goal_value: 0, goal_direction: 'min' }).met, true)
   assert.equal(getOkrMeasurement({ current_value: 10, goal_value: 5, goal_direction: 'min' }).attainment, 50)
   assert.equal(getOkrMeasurement({ current_value: 2, goal_value: 0, goal_direction: 'min' }).attainment, 0)
   assert.equal(getOkrMeasurement({ current_value: -5, goal_value: -10 }).attainment, null)
   assert.equal(getOkrMeasurement({ current_value: null, goal_value: 10 }).status, 'unmeasured')
+})
+
+test('an unconfirmed database zero is visible but never counted as measured or at target', () => {
+  const zero = { ...keyResults[0], current_value: 0, goal_value: 0, goal_direction: 'min' }
+  const measurement = getOkrMeasurement(zero)
+  assert.equal(measurement.current, 0)
+  assert.equal(measurement.status, 'needs_confirmation')
+  assert.equal(measurement.measured, false)
+  assert.equal(measurement.attainment, null)
+  assert.equal(measurement.met, false)
+  const [row] = buildDashboardOkrs({ objectives: [objectives[0]], keyResults: [zero], profile })
+  assert.equal(row.measuredCount, 0)
+  assert.equal(row.metCount, 0)
+  const confirmed = getOkrMeasurement({ ...zero, current_value_recorded_at: '2026-09-14T10:00:00Z' })
+  assert.equal(confirmed.status, 'met')
+  assert.equal(confirmed.measured, true)
+})
+
+test('owner weekly measurements can replace an unconfirmed official zero only in personal scope', () => {
+  const kr = { id: 'kr', current_value: 0, goal_value: 50 }
+  const values = [{ key_result_id: 'kr', user_id: 'me', value: 40, week_start: '2026-09-07' }]
+  const personal = getOkrMeasurement(kr, { values, userId: 'me', personal: true, asOf: '2026-09-14' })
+  assert.equal(personal.current, 40)
+  assert.equal(personal.measured, true)
+  assert.equal(personal.valueDate, '2026-09-07')
+  assert.equal(personal.source, 'Your latest weekly value')
+  assert.equal(getOkrMeasurement(kr, { values, userId: 'me' }).status, 'needs_confirmation')
+  assert.equal(getOkrMeasurement({ ...kr, current_value: 35 }).current, 35)
+  assert.equal(getOkrMeasurement({ ...kr, current_value: 35 }).measured, true)
+})
+
+test('Edit KR distinguishes unconfirmed zeros, confirmed zeros and nonzero legacy values', () => {
+  assert.equal(okrCurrentValueInput({ current_value: 0 }), '')
+  assert.equal(okrCurrentValueInput({ current_value: '0', current_value_recorded_at: '2026-09-01' }), 0)
+  assert.equal(okrCurrentValueInput({ current_value: 42 }), 42)
+  assert.equal(okrCurrentValueInput({ current_value: null }), '')
+})
+
+test('unrelated KR edits preserve existing values and confirmation dates', () => {
+  const now = '2026-09-14T10:00:00Z'
+  const unconfirmed = { current_value: 0, current_value_recorded_at: null }
+  const confirmed = { current_value: 0, current_value_recorded_at: '2026-09-01T10:00:00Z' }
+  assert.deepEqual(buildOkrCurrentValuePatch('', unconfirmed, { now }), {})
+  assert.deepEqual(buildOkrCurrentValuePatch('0', confirmed, { now }), {})
+  assert.deepEqual(buildOkrCurrentValuePatch('0', confirmed, { now, touched: true }), {})
+  assert.deepEqual(buildOkrCurrentValuePatch('42', { current_value: 42 }, { now }), {})
+  assert.deepEqual(buildOkrCurrentValuePatch('', confirmed, { now, touched: true }), {})
+})
+
+test('explicit zero confirmation and changes record a date while new blanks remain unknown', () => {
+  const now = '2026-09-14T10:00:00Z'
+  assert.deepEqual(buildOkrCurrentValuePatch('0', { current_value: 0 }, { touched: true, now }), { current_value: 0, current_value_recorded_at: now })
+  assert.deepEqual(buildOkrCurrentValuePatch('2', { current_value: 0, current_value_recorded_at: '2026-09-01' }, { touched: true, now }), { current_value: 2, current_value_recorded_at: now })
+  assert.deepEqual(buildOkrCurrentValuePatch('42', { current_value: 42 }, { touched: true, now }), { current_value: 42, current_value_recorded_at: now })
+  assert.deepEqual(buildOkrCurrentValuePatch('', undefined, { now }), { current_value: null, current_value_recorded_at: null })
+  assert.deepEqual(buildOkrCurrentValuePatch('0', undefined, { now }), { current_value: 0, current_value_recorded_at: now })
+  assert.throws(() => buildOkrCurrentValuePatch('invalid', undefined, { now }), /valid number/)
 })
 
 test('initiative completion is distinct from numeric target attainment', () => {

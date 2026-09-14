@@ -33,7 +33,7 @@ export default function Layout() {
 
   return (
     <div className="app-layout">
-      <button className="hamburger" onClick={()=>setSidebarOpen(o=>!o)}>
+      <button className="hamburger" aria-label={sidebarOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={sidebarOpen} onClick={()=>setSidebarOpen(o=>!o)}>
         {sidebarOpen?<X size={18} color="var(--text-primary)"/>:<Menu size={18} color="var(--text-primary)"/>}
       </button>
       <div className={`sidebar-overlay ${sidebarOpen?'open':''}`} onClick={()=>setSidebarOpen(false)}/>

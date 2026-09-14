@@ -59,17 +59,41 @@ function numeric(value) {
   return Number.isFinite(result) ? result : null
 }
 
+export function okrCurrentValueInput(kr) {
+  const value = numeric(kr?.current_value)
+  return value === null || (value === 0 && !kr?.current_value_recorded_at) ? '' : value
+}
+
+export function buildOkrCurrentValuePatch(input, existing, { touched = false, now = new Date().toISOString() } = {}) {
+  if (input == null || String(input).trim() === '') {
+    // Blank on an existing record means keep its value; opening a legacy zero
+    // must not turn an unrelated title edit into a confirmed measurement.
+    return existing ? {} : { current_value: null, current_value_recorded_at: null }
+  }
+  const value = numeric(input)
+  if (value === null) throw new Error('Current value must be a valid number.')
+  const changed = numeric(existing?.current_value) !== value
+  if (!existing || changed || (touched && !existing.current_value_recorded_at)) {
+    return { current_value: value, current_value_recorded_at: now }
+  }
+  return {}
+}
+
 export function getOkrMeasurement(kr, { values = [], userId, personal = false, asOf } = {}) {
-  // Current value in the OKR editor is authoritative. Weekly rows are a legacy
-  // fallback for this owner only, never a team value or another person's value.
+  // Zero was historically a database default, so an undated zero is not proof
+  // of a measurement. Explicitly confirmed zero and nonzero legacy values are
+  // authoritative; weekly fallback stays owner-only and dated.
   const official = numeric(kr.current_value)
+  const officialUsable = official !== null && (official !== 0 || Boolean(kr.current_value_recorded_at))
   const legacy = personal ? values
     .filter(row => row.key_result_id === kr.id && row.user_id === userId
       && (!asOf || row.week_start <= asOf) && numeric(row.value) !== null)
     .sort((a, b) => String(b.week_start).localeCompare(String(a.week_start)))[0] : null
-  const current = official ?? numeric(legacy?.value)
+  const legacyValue = numeric(legacy?.value)
+  const current = officialUsable ? official : legacyValue ?? official
+  const needsConfirmation = official === 0 && !officialUsable && legacyValue === null
   const goal = numeric(kr.goal_value)
-  const measured = current !== null && goal !== null
+  const measured = current !== null && goal !== null && !needsConfirmation
   const lowerIsBetter = kr.goal_direction === 'min'
   const met = measured && (lowerIsBetter ? current <= goal : current >= goal)
   let attainment = null
@@ -80,10 +104,10 @@ export function getOkrMeasurement(kr, { values = [], userId, personal = false, a
     attainment = Math.max(0, Math.min(100, attainment))
   }
   return {
-    current, goal, attainment, met,
-    status: !measured ? 'unmeasured' : met ? 'met' : 'below',
-    source: official !== null ? 'Official OKR value' : legacy ? 'Your latest weekly value' : null,
-    valueDate: official === null ? legacy?.week_start || null : null,
+    current, goal, attainment, met, measured,
+    status: needsConfirmation ? 'needs_confirmation' : !measured ? 'unmeasured' : met ? 'met' : 'below',
+    source: officialUsable ? 'Official OKR value' : legacy ? 'Your latest weekly value' : needsConfirmation ? 'Saved zero · not confirmed' : null,
+    valueDate: !officialUsable ? legacy?.week_start || null : null,
   }
 }
 
@@ -113,7 +137,7 @@ export function buildDashboardOkrs({ objectives = [], keyResults = [], milestone
     if (!results.length && (allChildren.length || (scope === 'personal' && !assignedToMe(objective, null, profile))
       || (scope !== 'personal' && !contextVisible(objective, null, profile, viewer.isManagement)))) return []
     return [{ ...objective, results,
-      measuredCount: results.filter(kr => kr.measurement.status !== 'unmeasured').length,
+      measuredCount: results.filter(kr => kr.measurement.measured).length,
       metCount: results.filter(kr => kr.measurement.met).length }]
   }).sort((a, b) => String(a.department || '').localeCompare(String(b.department || ''))
     || String(a.title || '').localeCompare(String(b.title || '')))

@@ -1,5 +1,6 @@
 import { buildTimeBuckets, dateKey, parseReportingDate } from './reportingPeriods.js'
 import { getClientStrategistIds } from './clientAssignments.js'
+import { planToday } from './planReview.js'
 
 export const SPEND_PLATFORMS = [
   { key: 'meta_spend', totalKey: 'meta_total_spend', label: 'Meta', color: '#1877f2' },
@@ -43,6 +44,30 @@ export function spendStatus(share) {
 }
 
 export const isActiveSpendClient = client => client.is_active !== false && !client.is_archived
+
+export function spendClientOptionLabels(clients) {
+  const groups = new Map()
+  for (const client of clients) {
+    const name = (client.name || 'Unnamed client').trim().toLowerCase()
+    if (!groups.has(name)) groups.set(name, [])
+    groups.get(name).push(client)
+  }
+  return new Map(clients.map(client => {
+    const name = client.name || 'Unnamed client'
+    const matches = groups.get(name.trim().toLowerCase())
+    if (matches.length === 1) return [client.id, name]
+    const active = isActiveSpendClient(client)
+    const sameStatus = matches.filter(match => isActiveSpendClient(match) === active)
+    const status = active ? 'Active' : 'Paused / past'
+    if (sameStatus.length === 1) return [client.id, `${name} · ${status}`]
+    // Use a stable, short record suffix, extending it only to resolve an actual collision.
+    let length = 6
+    while (length < String(client.id).length && sameStatus.some(match => match.id !== client.id
+      && String(match.id).slice(-length) === String(client.id).slice(-length))) length += 1
+    return [client.id, `${name} · ${status} · ${String(client.id).slice(-length)}`]
+  }))
+}
+
 export function scopeSpendClients(clients, profile, canManage = false) {
   if (canManage) return clients
   return profile?.position === 'creative_strategist'
@@ -50,7 +75,7 @@ export function scopeSpendClients(clients, profile, canManage = false) {
 }
 
 export function lastCompletedSpendWeek(today = new Date()) {
-  const monday = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  const monday = parseReportingDate(planToday(today))
   monday.setDate(monday.getDate() - (monday.getDay() + 6) % 7 - 7)
   return dateKey(monday)
 }

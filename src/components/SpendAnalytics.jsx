@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { getPeriodOptions, resolvePeriod } from '../lib/reportingPeriods'
 import { getClientStrategistIds, getClientStrategistNames } from '../lib/clientAssignments'
-import { compareSpendClients, formatSpendMoney, isActiveSpendClient, spendInPeriod, spendStatus, spendTrend, summarizeSpend } from '../lib/spendAnalytics'
+import { compareSpendClients, formatSpendMoney, isActiveSpendClient, spendClientOptionLabels, spendInPeriod, spendStatus, spendTrend, summarizeSpend } from '../lib/spendAnalytics'
 import './spend.css'
 
 const tooltipStyle = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }
@@ -17,6 +17,7 @@ export default function SpendAnalytics({ clients, entries, members = [], canFilt
   const [strategist, setStrategist] = useState('all')
   const [metric, setMetric] = useState('spend')
   const dates = useMemo(() => entries.map(row => row.week_start).sort(), [entries])
+  const clientLabels = useMemo(() => spendClientOptionLabels(clients), [clients])
   const period = resolvePeriod(periodKey, { earliestDate: dates[0] })
   const eligibleClients = clients.filter(client => (clientStatus === 'all' || (clientStatus === 'active') === isActiveSpendClient(client))
     && (strategist === 'all' || getClientStrategistIds(client).includes(strategist)))
@@ -37,7 +38,7 @@ export default function SpendAnalytics({ clients, entries, members = [], canFilt
       <label className="spend-field">Analytics period<select value={periodKey} onChange={e => setPeriodKey(e.target.value)}>{getPeriodOptions(dates).map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
       <label className="spend-field">Client status<select value={clientStatus} onChange={e => { setClientStatus(e.target.value); setClientId('all') }}><option value="all">Current + past clients</option><option value="active">Active clients</option><option value="past">Paused / past clients</option></select></label>
       {canFilterTeam && <label className="spend-field">Creative strategist<select value={strategist} onChange={e => { setStrategist(e.target.value); setClientId('all') }}><option value="all">All strategists</option>{visibleStrategists.map(member => <option key={member.id} value={member.id}>{member.full_name}</option>)}</select></label>}
-      <label className="spend-field">Client<select value={clientId} onChange={e => setClientId(e.target.value)}><option value="all">All clients in view</option>{eligibleClients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label>
+      <label className="spend-field">Client<select value={clientId} onChange={e => setClientId(e.target.value)}><option value="all">All clients in view</option>{eligibleClients.map(client => <option key={client.id} value={client.id}>{clientLabels.get(client.id)}</option>)}</select></label>
       {(clientId !== 'all' || clientStatus !== 'all' || strategist !== 'all') && <button className="btn btn-ghost btn-sm" onClick={() => { setClientId('all'); setClientStatus('all'); setStrategist('all') }}>Reset clients</button>}
     </div>
     <p className="spend-note">{period.dateLabel} · {selectedClients.length} roster clients in view. Weekly entries are assigned to the month of their week-start date; current periods may be incomplete.</p>

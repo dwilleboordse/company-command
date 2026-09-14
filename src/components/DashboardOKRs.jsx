@@ -11,6 +11,7 @@ const STATUS = {
   met: { label: 'Target met', className: 'okr-status-met' },
   below: { label: 'Not at target', className: 'okr-status-below' },
   unmeasured: { label: 'Not measured', className: 'okr-status-unmeasured' },
+  needs_confirmation: { label: 'Needs confirmation', className: 'okr-status-unmeasured' },
 }
 
 function metricValue(value, unit) {
@@ -87,7 +88,7 @@ export default function DashboardOKRs() {
         if (objectives.data.length) {
           const visibility = ['team', ...(isManagement ? ['management'] : []), ...(isCEO ? ['ceo'] : [])]
           keyResults = await fetchAllRows(() => supabase.from('key_results')
-            .select('id,objective_id,title,metric_name,goal_value,goal_direction,unit,current_value,visibility,assignee_ids,is_active')
+            .select('id,objective_id,title,metric_name,goal_value,goal_direction,unit,current_value,current_value_recorded_at,visibility,assignee_ids,is_active')
             .in('objective_id', objectives.data.map(row => row.id)).in('visibility', visibility)
             .eq('is_active', true).order('id'))
           if (keyResults.error) throw keyResults.error
@@ -119,7 +120,8 @@ export default function DashboardOKRs() {
   const objectiveRows = buildDashboardOkrs({ ...data, profile: profile || {}, isCEO, isManagement,
     scope, department, asOf })
   const results = objectiveRows.flatMap(objective => objective.results)
-  const measured = results.filter(kr => kr.measurement.status !== 'unmeasured').length
+  const measured = results.filter(kr => kr.measurement.measured).length
+  const needsConfirmation = results.filter(kr => kr.measurement.status === 'needs_confirmation').length
   const met = results.filter(kr => kr.measurement.met).length
   const departments = [...new Set(data.objectives.map(objective => objective.department)
     .filter(value => value && value.toLowerCase() !== 'company'))].sort()
@@ -156,12 +158,13 @@ export default function DashboardOKRs() {
           : <>
             <div className="home-okr-summary">
               <span>{scopeLabel}</span>
-              <span>{objectiveRows.length} objective{objectiveRows.length === 1 ? '' : 's'}{measured > 0 ? ` · ${met}/${measured} measured key results at target` : ''}{results.length > measured ? ` · ${results.length - measured} not measured` : ''}</span>
+              <span>{objectiveRows.length} objective{objectiveRows.length === 1 ? '' : 's'}{measured > 0 ? ` · ${met}/${measured} measured key results at target` : ''}{needsConfirmation > 0 ? ` · ${needsConfirmation} need confirmation` : ''}{results.length > measured + needsConfirmation ? ` · ${results.length - measured - needsConfirmation} not measured` : ''}</span>
             </div>
             {objectiveRows.length ? <div className="home-okr-grid">{objectiveRows.map(objective => <ObjectiveOverview key={objective.id} objective={objective}/>)}</div>
               : <div className="card home-okr-empty"><Target size={22}/><p>No {scope === 'personal' ? 'personal' : scope === 'company' ? 'company-level' : 'department'} OKRs available for {quarter.replace('-', ' ')}.</p>
                 <Link to="/okrs" className="btn btn-ghost btn-sm">View OKRs <ArrowRight size={13}/></Link></div>}
             {results.length > 0 && <p className="home-okr-footnote">Target attainment reflects current results, not whether the quarter is on schedule. Initiative completion is tracked separately.</p>}
+            {needsConfirmation > 0 && <p className="home-okr-footnote">Some saved zeros may be automatic defaults, not measured results. They are excluded from target attainment until confirmed. A manager can open OKRs → Edit key result and enter the current value, including 0.</p>}
           </>}
     </section>
   )

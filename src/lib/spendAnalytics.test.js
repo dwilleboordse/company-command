@@ -1,8 +1,36 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildSpendPayload, compareSpendClients, formatSpendMoney, isCompleteSpendEntry, lastCompletedSpendWeek, scopeSpendClients, spendFormValues, spendShare, spendTrend, summarizeSpend } from './spendAnalytics.js'
+import { buildSpendPayload, compareSpendClients, formatSpendMoney, isCompleteSpendEntry, lastCompletedSpendWeek, scopeSpendClients, spendClientOptionLabels, spendFormValues, spendShare, spendTrend, summarizeSpend } from './spendAnalytics.js'
 
 const context = { clientId: 'client-a', enteredBy: 'user-a', weekStart: '2026-09-07' }
+
+test('analytics client options disambiguate duplicate records without changing identities', () => {
+  const clients = [
+    { id: 'unique', name: 'Unique client' },
+    { id: 'bambora-live', name: 'Bambora' },
+    { id: 'bambora-past', name: 'Bambora', is_archived: true },
+    { id: 'record-123456', name: 'Abriga', is_active: false },
+    { id: 'record-654321', name: 'Abriga', is_archived: true },
+  ]
+  const before = structuredClone(clients)
+  const labels = spendClientOptionLabels(clients)
+  assert.equal(labels.get('unique'), 'Unique client')
+  assert.equal(labels.get('bambora-live'), 'Bambora · Active')
+  assert.equal(labels.get('bambora-past'), 'Bambora · Paused / past')
+  assert.equal(labels.get('record-123456'), 'Abriga · Paused / past · 123456')
+  assert.equal(labels.get('record-654321'), 'Abriga · Paused / past · 654321')
+  assert.deepEqual([...labels.keys()], clients.map(client => client.id))
+  assert.deepEqual(clients, before)
+})
+
+test('duplicate client labels normalize name casing and extend colliding short IDs', () => {
+  const labels = spendClientOptionLabels([
+    { id: 'record-a123456', name: 'Same' },
+    { id: 'record-b123456', name: 'same' },
+  ])
+  assert.equal(labels.get('record-a123456'), 'Same · Active · a123456')
+  assert.equal(labels.get('record-b123456'), 'same · Active · b123456')
+})
 
 test('spend completion accepts explicit zero but never counts missing, partial or invalid amounts', () => {
   assert.equal(isCompleteSpendEntry({ total_spend: 0, ddu_spend: 0 }), true)
@@ -55,9 +83,11 @@ test('missing amounts, zero spend, and missing entries remain distinct', () => {
 })
 
 test('last completed week always returns the preceding Monday across calendar boundaries', () => {
-  assert.equal(lastCompletedSpendWeek(new Date(2026, 8, 14)), '2026-09-07')
-  assert.equal(lastCompletedSpendWeek(new Date(2026, 8, 20)), '2026-09-07')
-  assert.equal(lastCompletedSpendWeek(new Date(2026, 0, 1)), '2025-12-22')
+  assert.equal(lastCompletedSpendWeek(new Date('2026-09-14T09:00:00Z')), '2026-09-07')
+  assert.equal(lastCompletedSpendWeek(new Date('2026-09-20T09:00:00Z')), '2026-09-07')
+  assert.equal(lastCompletedSpendWeek(new Date('2026-01-01T09:00:00Z')), '2025-12-22')
+  assert.equal(lastCompletedSpendWeek(new Date('2026-09-13T19:59:59Z')), '2026-08-31')
+  assert.equal(lastCompletedSpendWeek(new Date('2026-09-13T20:00:00Z')), '2026-09-07')
 })
 
 test('CS scope follows roster assignment with legacy fallback, not creator ownership', () => {

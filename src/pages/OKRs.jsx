@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
+import { buildOkrCurrentValuePatch, okrCurrentValueInput } from '../lib/dashboardOkrs'
 import { Plus, Edit2, Trash2, ChevronDown, ChevronRight, BookOpen, Target, CheckCircle2, Circle, AlertCircle } from 'lucide-react'
 
 const ROLE_LABELS = {
@@ -154,17 +155,31 @@ function ObjectiveModal({ existing, allMembers, onClose, onSave }) {
 function KRModal({ objectiveId, existing, allMembers, onClose, onSave }) {
   const [form,setForm]=useState({
     title:existing?.title||'', metric_name:existing?.metric_name||'',
-    goal_value:existing?.goal_value||'', goal_direction:existing?.goal_direction||'max',
+    goal_value:existing?.goal_value??'', goal_direction:existing?.goal_direction||'max',
     unit:existing?.unit||'%', visibility:existing?.visibility||'team',
-    current_value:existing?.current_value||'', assignee_ids:parseAssignees(existing?.assignee_ids),
+    current_value:okrCurrentValueInput(existing), assignee_ids:parseAssignees(existing?.assignee_ids),
   })
   const [saving,setSaving]=useState(false)
+  const [saveError,setSaveError]=useState('')
+  const [currentValueTouched,setCurrentValueTouched]=useState(false)
   async function handleSave() {
-    if (!form.metric_name||!form.goal_value) return; setSaving(true)
-    const p={title:form.title,metric_name:form.metric_name,goal_value:parseFloat(form.goal_value),goal_direction:form.goal_direction,unit:form.unit,visibility:form.visibility,current_value:parseFloat(form.current_value)||0,assignee_ids:form.assignee_ids}
-    if (existing) await supabase.from('key_results').update(p).eq('id',existing.id)
-    else await supabase.from('key_results').insert({...p,objective_id:objectiveId})
-    onSave(); setSaving(false); onClose()
+    if (saving) return
+    if (!form.metric_name.trim() || String(form.goal_value).trim() === '' || !Number.isFinite(Number(form.goal_value))) {
+      setSaveError('Enter a metric name and a valid goal. Zero is allowed.'); return
+    }
+    setSaving(true); setSaveError('')
+    try {
+      const p={title:form.title,metric_name:form.metric_name,goal_value:Number(form.goal_value),goal_direction:form.goal_direction,unit:form.unit,visibility:form.visibility,assignee_ids:form.assignee_ids,
+        ...buildOkrCurrentValuePatch(form.current_value, existing, { touched: currentValueTouched })}
+      const result = existing
+        ? await supabase.from('key_results').update(p).eq('id',existing.id).select('id').single()
+        : await supabase.from('key_results').insert({...p,objective_id:objectiveId}).select('id').single()
+      if (result.error) throw result.error
+      if (!result.data?.id) throw new Error('No key result was saved. Check your editing permissions.')
+      await onSave(); onClose()
+    } catch (error) {
+      setSaveError(error.message || 'The key result could not be saved. Please try again.')
+    } finally { setSaving(false) }
   }
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -180,8 +195,11 @@ function KRModal({ objectiveId, existing, allMembers, onClose, onSave }) {
           <div className="form-group"><label>Goal *</label>
             <input type="number" value={form.goal_value} onChange={e=>setForm({...form,goal_value:e.target.value})}/>
           </div>
-          <div className="form-group"><label>Current Value</label>
-            <input type="number" value={form.current_value} onChange={e=>setForm({...form,current_value:e.target.value})} placeholder="0"/>
+          <div className="form-group"><label htmlFor="okr-current-value">Current Value</label>
+            <input id="okr-current-value" type="number" step="any" value={form.current_value} onChange={e=>{setCurrentValueTouched(true);setForm({...form,current_value:e.target.value})}} placeholder="Enter measured value"/>
+            <p style={{fontSize:11,color:'var(--text-muted)',lineHeight:1.5,marginTop:5}}>{existing?.current_value != null && Number(existing.current_value) === 0 && !existing.current_value_recorded_at
+              ? 'Saved 0 is not yet confirmed. Enter 0 again if that is the measured result; leave blank to keep it unconfirmed.'
+              : existing ? 'Enter a measured result, including 0. Leaving this blank keeps the saved value.' : 'Optional. Leave blank if not measured yet; enter 0 only when confirmed.'}</p>
           </div>
         </div>
         <div className="grid-2">
@@ -203,6 +221,7 @@ function KRModal({ objectiveId, existing, allMembers, onClose, onSave }) {
           </select>
         </div>
         <AssigneePicker allMembers={allMembers} selected={form.assignee_ids} onChange={ids=>setForm({...form,assignee_ids:ids})} accentColor="var(--green)"/>
+        {saveError && <p role="alert" style={{fontSize:12,color:'var(--red)',marginTop:12}}>{saveError}</p>}
         <div className="flex gap-2 mt-4">
           <button className="btn btn-primary" onClick={handleSave} disabled={saving}>{saving?'Saving...':existing?'Save':'Add KR'}</button>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
