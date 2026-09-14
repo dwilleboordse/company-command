@@ -4,6 +4,7 @@ import { ArrowRight, RefreshCw, Target } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { fetchAllRows } from '../lib/reportingData'
+import { hasBusinessDashboardAccess } from '../lib/dashboardAccess'
 import { today, parseLocal } from '../lib/dates'
 import { buildDashboardOkrs, currentOkrQuarter, formatOkrLabel } from '../lib/dashboardOkrs'
 
@@ -64,7 +65,7 @@ function ObjectiveOverview({ objective }) {
 
 export default function DashboardOKRs() {
   const { profile, isCEO, isManagement } = useAuth()
-  const [scope, setScope] = useState(isCEO ? 'company' : 'personal')
+  const [scope, setScope] = useState(hasBusinessDashboardAccess(profile) ? 'company' : 'personal')
   const [department, setDepartment] = useState('all')
   const [data, setData] = useState({ objectives: [], keyResults: [], milestones: [], values: [] })
   const [loading, setLoading] = useState(true)

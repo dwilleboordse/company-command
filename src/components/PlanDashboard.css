@@ -14,7 +14,10 @@
 .plan-dashboard-status-line{display:flex;gap:9px;flex-wrap:wrap;margin:12px 0}.plan-dashboard-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;background:var(--bg-hover);color:var(--text-secondary);border:1px solid var(--border)}
 .plan-dashboard-badge.on_track{color:var(--green);border-color:var(--green)}.plan-dashboard-badge.at_risk,.plan-dashboard-badge.due,.plan-dashboard-badge.update_draft,.plan-dashboard-badge.draft{color:var(--amber);border-color:var(--amber)}
 .plan-dashboard-badge.blocked,.plan-dashboard-badge.missing,.plan-dashboard-badge.ended{color:var(--red);border-color:var(--red)}
-.plan-dashboard-filter{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;margin:18px 0 12px}.plan-dashboard-filter select{padding:8px 10px;border:1px solid var(--border);border-radius:7px;background:var(--bg-card);color:var(--text-primary);font:inherit}
+.plan-dashboard-filter{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;margin:18px 0 12px}
+/* Keep the shared light/dark select arrow; a background shorthand resets its placement. */
+.plan-dashboard-filter select{padding:8px 10px;padding-right:32px;border:1px solid var(--border);border-radius:7px;background-color:var(--bg-card);background-repeat:no-repeat;background-position:right 10px center;background-size:12px 12px;color:var(--text-primary);font:inherit}
+.plan-dashboard-filter select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim)}
 .plan-dashboard-table-wrap{overflow:auto;max-height:420px}.plan-dashboard-table{width:100%;border-collapse:collapse;text-align:left;font-size:12px;min-width:640px}
 .plan-dashboard-table th{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);font-weight:600;padding:10px;border-bottom:1px solid var(--border)}
 .plan-dashboard-table thead th{position:sticky;top:0;background:var(--bg-card);z-index:1}

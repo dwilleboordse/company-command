@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Compass, Lock } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
+import { hasBusinessDashboardAccess } from '../lib/dashboardAccess'
 import { buildPlanOverview, PLAN_REVIEW_EVENT, planBlockerText, planReviewLink, planWeekStart } from '../lib/planReview'
 import './PlanDashboard.css'
 
@@ -11,7 +12,8 @@ const PULSE_FIELDS = 'plan_id,user_id,week_start,locked_at,track_status,mileston
 const nameRole = value => (value || 'Role not set').replaceAll('_', ' ')
 
 export default function PlanDashboard() {
-  const { profile, isCEO } = useAuth()
+  const { profile } = useAuth()
+  const teamOverview = hasBusinessDashboardAccess(profile)
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   const [filter, setFilter] = useState('attention')
@@ -34,7 +36,7 @@ export default function PlanDashboard() {
     if (!profile?.id) return
     let cancelled = false
     ;(async () => {
-      const results = isCEO
+      const results = teamOverview
         ? await Promise.all([
           supabase.from('profiles').select('id,full_name,position,department,is_active').eq('is_active', true),
           supabase.from('hundred_day_plans').select(PLAN_FIELDS),
@@ -49,14 +51,14 @@ export default function PlanDashboard() {
       const failed = results.find(result => result.error)
       if (failed) { setError(failed.error.message); return }
       setError('')
-      setData({ userId: profile.id, isCEO, profiles: results[0].data, plans: results[1].data, pulses: results[2].data })
+      setData({ userId: profile.id, teamOverview, profiles: results[0].data, plans: results[1].data, pulses: results[2].data })
     })().catch(error => { if (!cancelled) setError(error.message || 'Could not load the 100-day plans.') })
     return () => { cancelled = true }
   // The profile's presentation fields do not alter which rows this dashboard may request.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile?.id, isCEO, week, revision])
+  }, [profile?.id, teamOverview, week, revision])
 
-  const overview = data && data.userId === profile?.id && data.isCEO === isCEO
+  const overview = data && data.userId === profile?.id && data.teamOverview === teamOverview
     ? buildPlanOverview(data.profiles, data.plans, data.pulses) : null
   const teamLink = '/100-day-plan?view=team'
 
@@ -64,14 +66,14 @@ export default function PlanDashboard() {
     <section className="card plan-dashboard" aria-labelledby="plan-dashboard-title">
       <div className="plan-dashboard-heading">
         <div>
-          <h2 id="plan-dashboard-title"><Compass size={19} aria-hidden="true" /> {isCEO ? '100-day execution overview' : 'Your 100-day plan'}</h2>
-          <p>{isCEO ? 'Active team members · weekly health comes from locked updates only.' : 'Review the plan you already have; log and lock one execution update each week.'} Week of {week} · Dubai time.</p>
+          <h2 id="plan-dashboard-title"><Compass size={19} aria-hidden="true" /> {teamOverview ? '100-day execution overview' : 'Your 100-day plan'}</h2>
+          <p>{teamOverview ? 'Active team members · weekly health comes from locked updates only.' : 'Review the plan you already have; log and lock one execution update each week.'} Week of {week} · Dubai time.</p>
         </div>
-        <Link to={isCEO ? teamLink : '/100-day-plan'}>{isCEO ? 'Open team plans' : 'Open my plan'} →</Link>
+        <Link to={teamOverview ? teamLink : '/100-day-plan'}>{teamOverview ? 'Open team plans' : 'Open my plan'} →</Link>
       </div>
       {error ? <div className="plan-dashboard-error" role="alert">Could not load plan status: {error} <button className="btn btn-ghost" onClick={() => setRevision(value => value + 1)}>Retry</button></div>
         : !overview ? <p className="plan-dashboard-empty">Loading plans…</p>
-          : isCEO ? <>
+          : teamOverview ? <>
             <div className="plan-dashboard-stats">
               <div className="plan-dashboard-stat"><strong>{overview.committed}<small style={{ fontSize: 13, color: 'var(--text-muted)' }}> / {overview.total}</small></strong><span>Current committed plans{overview.upcoming ? ` · ${overview.upcoming} upcoming` : ''}</span></div>
               <div className="plan-dashboard-stat"><strong>{overview.missing + overview.draft + overview.ended + overview.needsDates}</strong><span>{overview.missing} missing · {overview.draft} drafts · {overview.ended} ended{overview.needsDates ? ` · ${overview.needsDates} need dates` : ''}</span></div>
