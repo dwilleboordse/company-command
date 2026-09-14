@@ -1,0 +1,48 @@
+.spend-section { min-width: 0; }
+.spend-heading, .spend-controls, .spend-log-preview { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+.spend-heading { margin-bottom: 16px; }
+.spend-heading h2, .spend-heading h3 { margin: 0; }
+.spend-heading h2 { font-size: 19px; }
+.spend-heading h3 { font-size: 15px; }
+.spend-note { color: var(--text-muted); font-size: 12px; line-height: 1.5; margin: 8px 0 14px; }
+.spend-error { color: var(--red); background: var(--red-dim); border-radius: var(--radius); padding: 12px; font-size: 13px; }
+.spend-controls { justify-content: flex-start; align-items: flex-end; margin-bottom: 16px; }
+.spend-field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--text-secondary); }
+.spend-controls .spend-field { min-width: 150px; }
+.spend-controls input, .spend-controls select { width: auto; max-width: 100%; }
+.spend-kpis { display: grid; grid-template-columns: repeat(auto-fit,minmax(145px,1fr)); gap: 12px; margin-bottom: 18px; }
+.spend-kpi { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
+.spend-kpi-label { font-size: 11px; color: var(--text-muted); margin-bottom: 5px; }
+.spend-kpi-value { font-size: 24px; font-family: var(--font-display); font-weight: 700; letter-spacing: -.03em; }
+.spend-kpi-detail { font-size: 11px; color: var(--text-muted); margin-top: 5px; }
+.spend-chart-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 18px; margin: 18px 0; }
+.spend-chart-panel { min-width: 0; padding: 18px; }
+.spend-chart { height: 250px; width: 100%; min-width: 0; }
+.spend-chip { display: inline-flex; font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 20px; white-space: nowrap; }
+.spend-table { min-width: 710px; }
+.spend-table td { vertical-align: middle; }
+.spend-money { font-family: var(--font-mono); white-space: nowrap; }
+.spend-table button.spend-client-link { background: none; border: 0; padding: 0; text-align: left; color: var(--accent); cursor: pointer; font: inherit; font-weight: 600; }
+.spend-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.spend-history { padding: 18px; background: var(--bg); border-top: 1px solid var(--border); }
+.spend-platform-history { margin-top: 8px; }
+.spend-platform-history summary { cursor: pointer; color: var(--accent); font-size: 12px; }
+.spend-platform-history table { margin-top: 10px; min-width: 330px; }
+.spend-platform-history .spend-note { max-width: 370px; }
+.spend-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; font-size: 11px; color: var(--text-secondary); }
+.spend-legend span:before { content: ''; display: inline-block; background: var(--series); width: 9px; height: 9px; margin-right: 5px; border-radius: 2px; }
+.spend-log-modal { max-width: 610px; }
+.spend-log-modal form { margin-top: 18px; }
+.spend-input-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(200px,1fr)); gap: 14px; margin-bottom: 12px; }
+.spend-platform-field { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin: 0; min-width: 0; }
+.spend-platform-field legend { font-size: 12px; font-weight: 600; }
+.spend-platform-field .spend-field + .spend-field { margin-top: 8px; }
+.spend-log-preview { font-size: 12px; padding: 12px; background: var(--bg); border-radius: var(--radius); margin: 14px 0; }
+.spend-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 20px; flex-wrap: wrap; }
+.spend-tabs button { background: transparent; color: var(--text-secondary); border: 0; border-bottom: 2px solid transparent; cursor: pointer; padding: 11px 16px; font-size: 13px; }
+.spend-tabs button[aria-selected=true] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 700; }
+.spend-paused { margin-top: 20px; }
+.spend-paused summary { padding: 15px; cursor: pointer; font-size: 13px; font-weight: 600; }
+.spend-empty { padding: 26px 14px; color: var(--text-muted); font-size: 13px; text-align: center; }
+@media(max-width: 900px) { .spend-chart-grid { grid-template-columns: 1fr; } }
+@media(max-width: 580px) { .spend-kpis { grid-template-columns: repeat(2,minmax(0,1fr)); } .spend-kpi-value { font-size: 21px; } .spend-controls .spend-field { min-width: 0; flex: 1 1 130px; } .spend-controls select, .spend-controls input { width: 100%; } .spend-heading { align-items: flex-start; } .spend-heading .spend-actions { width: 100%; } }

@@ -3,7 +3,8 @@ import { useAuth } from '../contexts/AuthContext'
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useTheme } from '../contexts/ThemeContext'
-import { LayoutDashboard, Target, Calendar, Video, LogOut, Settings, TrendingUp, TrendingDown, Users, DollarSign, Menu, X, FileText, Trophy, Heart, UserCheck, Sun, Moon, ClipboardCheck, ClipboardList, BarChart3, Compass, ShieldCheck, Network, BriefcaseBusiness } from 'lucide-react'
+import HundredDayPlanReminder from './HundredDayPlanReminder'
+import { LayoutDashboard, Target, LogOut, Settings, TrendingUp, TrendingDown, Users, DollarSign, Menu, X, FileText, Trophy, Heart, UserCheck, Sun, Moon, ClipboardList, BarChart3, Compass, ShieldCheck, Network, BriefcaseBusiness } from 'lucide-react'
 
 export default function Layout() {
   const { profile, signOut, isCEO, isManagement, isOps } = useAuth()
@@ -47,15 +48,10 @@ export default function Layout() {
           <NavLink to="/100-day-plan" className={nl}><Compass size={16}/> 100-Day Plan</NavLink>
           <NavLink to="/monthly-survey" className={nl}><ClipboardList size={16}/> Monthly Survey</NavLink>
 
-          <p className="nav-section-label">Planning</p>
-          <NavLink to="/calendar" className={nl}><Calendar size={16}/> Calendar</NavLink>
-          <NavLink to="/meetings" className={nl}><Video size={16}/> Meetings</NavLink>
-
           <p className="nav-section-label">Tracking</p>
           <NavLink to="/spend" className={nl}><DollarSign size={16}/> Spend Tracker</NavLink>
           <NavLink to="/changelog" className={nl}><FileText size={16}/> Change Log</NavLink>
           <NavLink to="/rewards" className={nl}><Trophy size={16}/> Rewards</NavLink>
-          <NavLink to="/onboarding" className={nl}><ClipboardCheck size={16}/> Onboarding</NavLink>
           {(isManagement || isOps) && (
             <NavLink to="/accountability" className={nl}><ShieldCheck size={16}/> Accountability</NavLink>
           )}
@@ -127,7 +123,7 @@ export default function Layout() {
           </div>
         </div>
       </aside>
-      <main className="main-content"><Outlet/></main>
+      <main className="main-content"><HundredDayPlanReminder/><Outlet/></main>
     </div>
   )
 }

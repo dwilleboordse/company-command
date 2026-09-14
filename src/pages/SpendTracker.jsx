@@ -1,857 +1,132 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { ChevronLeft, ChevronRight, Pause, Play } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { getClientStrategistIds, getClientStrategistNames } from '../lib/clientAssignments'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from 'recharts'
-import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Edit2, Check, EyeOff, Pause, Play } from 'lucide-react'
-import { weekLabel, weekNum } from '../lib/dates'
+import { dateKey } from '../lib/reportingPeriods'
+import { fetchSpendData } from '../lib/spendData'
+import { formatSpendMoney, isActiveSpendClient, lastCompletedSpendWeek, shiftSpendWeek, spendInPeriod, spendNumber, spendShare, spendStatus, summarizeSpend, SPEND_PLATFORMS } from '../lib/spendAnalytics'
+import { weekLabel } from '../lib/dates'
+import SpendAnalytics, { SpendKpi } from '../components/SpendAnalytics'
+import SpendLogModal from '../components/SpendLogModal'
+import '../components/spend.css'
 
-const PLATFORMS = [
-  {key:'meta_spend',     totalKey:'meta_total_spend',     label:'Meta',     color:'#1877f2'},
-  {key:'tiktok_spend',   totalKey:'tiktok_total_spend',   label:'TikTok',   color:'#f43f5e'},
-  {key:'applovin_spend', totalKey:'applovin_total_spend', label:'AppLovin', color:'#8b5cf6'},
-  {key:'google_spend',   totalKey:'google_total_spend',   label:'Google',   color:'#34a853'},
-  {key:'other_spend',    totalKey:'other_spend',          label:'Other',    color:'#6b7280'},
-]
-
-function getStatus(pct) {
-  if (pct>=50) return {label:'Excellent', color:'var(--green)', bg:'var(--green-dim)'}
-  if (pct>=20) return {label:'Healthy',   color:'var(--amber)', bg:'var(--amber-dim)'}
-  return           {label:'At Risk',    color:'var(--red)',   bg:'var(--red-dim)'}
-}
-function fmtMoney(n) {
-  if (!n) return '—'
-  if (n>=1000000) return `$${(n/1000000).toFixed(1)}M`
-  if (n>=1000)    return `$${(n/1000).toFixed(1)}K`
-  return `$${Number(n).toLocaleString()}`
-}
-
-// Month helpers
-function getMonthStart(d) {
-  return new Date(d.getFullYear(), d.getMonth(), 1)
-}
-function getMonthEnd(d) {
-  return new Date(d.getFullYear(), d.getMonth()+1, 0)
-}
-function monthLabel(d) {
-  return d.toLocaleString('default',{month:'long',year:'numeric'})
-}
-function addMonths(d,n) {
-  const r=new Date(d.getFullYear(), d.getMonth()+n, 1)
-  return r
-}
-
-// Get the Monday of last week (default target week)
-function getLastMonday() {
-  const d = new Date()
-  const day = d.getDay() // 0=Sun,1=Mon...
-  const diff = day === 0 ? 13 : day + 6 // go back to last Monday
-  d.setDate(d.getDate() - diff)
-  d.setHours(0,0,0,0)
-  return d
-}
-function getMondayOfWeek(d) {
-  const day = d.getDay()
-  const diff = day === 0 ? -6 : 1 - day
-  const m = new Date(d)
-  m.setDate(m.getDate() + diff)
-  m.setHours(0,0,0,0)
-  return m
-}
-function addWeeks(d, n) {
-  const r = new Date(d)
-  r.setDate(r.getDate() + n*7)
-  return r
-}
-// Local-time YYYY-MM-DD (avoids UTC shift that turns Monday into Sunday)
-function toDateStr(d) {
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
-}
-// Parse YYYY-MM-DD as a local-time Date
-function parseISODate(str) {
-  const [y, m, d] = str.split('-').map(Number)
-  return new Date(y, m-1, d)
-}
-function isCurrentWeek(dateStr) {
-  const now = new Date()
-  const monday = getMondayOfWeek(now)
-  return dateStr === toDateStr(monday)
-}
-function isFutureWeek(dateStr) {
-  const now = new Date()
-  const monday = getMondayOfWeek(now)
-  return dateStr > toDateStr(monday)
-}
-
-async function fetchSpendTrackerData() {
-  const [clientResult, memberResult] = await Promise.all([
-    // Include legacy inactive clients so they can be viewed and restored from the paused drawer.
-    supabase.from('clients').select('*').order('name'),
-    supabase.from('profiles').select('id,full_name,position,is_active').eq('is_active', true).order('full_name'),
-  ])
-  const allClients = clientResult.data || []
-  const activeMembers = (memberResult.data || []).filter(member => member.is_active === true)
-  const entryMap = {}
-
-  if (allClients.length) {
-    const { data: entryData, error: entryError } = await supabase.from('spend_entries').select('*')
-      .in('client_id', allClients.map(client => client.id))
-      .order('week_start', { ascending: false })
-    entryData?.forEach(entry => {
-      if (!entryMap[entry.client_id]) entryMap[entry.client_id] = []
-      entryMap[entry.client_id].push(entry)
-    })
-    if (entryError) console.error('Spend entries failed to load:', entryError.message)
-  }
-  if (clientResult.error) console.error('Spend Tracker clients failed to load:', clientResult.error.message)
-  if (memberResult.error) console.error('Spend Tracker members failed to load:', memberResult.error.message)
-
-  return { clients: allClients, members: activeMembers, entries: entryMap }
-}
-
-// ── LOG MODAL ────────────────────────────────────────────────
-function LogModal({ client, existing, weekStart, onClose, onSave }) {
-  const { profile } = useAuth()
-  const isEdit = !!existing?.id
-  const [form, setForm] = useState({
-    total_spend:          existing?.total_spend          || '',
-    meta_spend:           existing?.meta_spend           || '',
-    meta_total_spend:     existing?.meta_total_spend     || '',
-    tiktok_spend:         existing?.tiktok_spend         || '',
-    tiktok_total_spend:   existing?.tiktok_total_spend   || '',
-    applovin_spend:       existing?.applovin_spend       || '',
-    applovin_total_spend: existing?.applovin_total_spend || '',
-    google_spend:         existing?.google_spend         || '',
-    google_total_spend:   existing?.google_total_spend   || '',
-    other_spend:          existing?.other_spend          || '',
-    notes:                existing?.notes                || '',
-  })
-  const [saving, setSaving] = useState(false)
-
-  const dduPlatformSum = PLATFORMS.reduce((s,p) => s + (parseFloat(form[p.key])||0), 0)
-  const totalPlatformSum = PLATFORMS.reduce((s,p) => s + (parseFloat(form[p.totalKey])||0), 0)
-  const effectiveTotal = totalPlatformSum > 0 ? totalPlatformSum : (parseFloat(form.total_spend)||0)
-  const pct = effectiveTotal > 0 ? ((dduPlatformSum / effectiveTotal)*100).toFixed(1) : null
-  const status = pct !== null ? getStatus(parseFloat(pct)) : null
-
-  async function handleSave() {
-    if (!effectiveTotal) return
-    setSaving(true)
-    await supabase.from('spend_entries').upsert({
-      client_id: client.id, week_start: weekStart,
-      ddu_spend: dduPlatformSum || 0,
-      total_spend: effectiveTotal,
-      meta_spend:           parseFloat(form.meta_spend)||0,
-      meta_total_spend:     parseFloat(form.meta_total_spend)||0,
-      tiktok_spend:         parseFloat(form.tiktok_spend)||0,
-      tiktok_total_spend:   parseFloat(form.tiktok_total_spend)||0,
-      applovin_spend:       parseFloat(form.applovin_spend)||0,
-      applovin_total_spend: parseFloat(form.applovin_total_spend)||0,
-      google_spend:         parseFloat(form.google_spend)||0,
-      google_total_spend:   parseFloat(form.google_total_spend)||0,
-      other_spend:          parseFloat(form.other_spend)||0,
-      notes: form.notes,
-      entered_by: profile?.id,
-    }, { onConflict:'client_id,week_start' })
-    onSave(); setSaving(false); onClose()
-  }
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" style={{maxWidth:520}} onClick={e=>e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-1">
-          <div>
-            <h2 className="modal-title" style={{marginBottom:2}}>{client.name}</h2>
-            <p style={{fontSize:11,color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>
-              {isEdit ? '✎ Editing' : '+ Logging'} W{weekNum(weekStart)} · {weekLabel(weekStart)}
-            </p>
-          </div>
-          {pct !== null && (
-            <div style={{textAlign:'right'}}>
-              <div style={{fontFamily:'var(--font-display)',fontSize:28,fontWeight:800,letterSpacing:'-0.04em',color:status.color}}>{pct}%</div>
-              <div style={{fontSize:10,color:status.color,fontFamily:'var(--font-mono)'}}>{status.label}</div>
-            </div>
-          )}
-        </div>
-
-        <div className="card-label" style={{marginTop:16,marginBottom:10}}>Spend Per Platform</div>
-        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))',gap:10,marginBottom:14}}>
-          {PLATFORMS.map(p => (
-            <div key={p.key} style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:10}}>
-              <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}>
-                <div style={{width:8,height:8,borderRadius:'50%',background:p.color,flexShrink:0}}/>
-                <span style={{fontSize:12,fontWeight:600,color:'var(--text-primary)'}}>{p.label}</span>
-              </div>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6}}>
-                <div>
-                  <label style={{textTransform:'none',letterSpacing:0,fontSize:10,color:'var(--text-muted)'}}>DDU Spend</label>
-                  <input type="number" value={form[p.key]}
-                    onChange={e=>setForm({...form,[p.key]:e.target.value})}
-                    placeholder="0" style={{padding:'5px 8px',fontSize:12}}/>
-                </div>
-                <div>
-                  <label style={{textTransform:'none',letterSpacing:0,fontSize:10,color:'var(--text-muted)'}}>Total Spend</label>
-                  <input type="number" value={form[p.totalKey]}
-                    onChange={e=>setForm({...form,[p.totalKey]:e.target.value})}
-                    placeholder="0" style={{padding:'5px 8px',fontSize:12}}/>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {(dduPlatformSum>0||totalPlatformSum>0)&&(
-          <div style={{marginBottom:14,padding:'8px 12px',background:'var(--bg)',borderRadius:'var(--radius)',border:'1px solid var(--border)',fontSize:12,display:'flex',justifyContent:'space-between',gap:16}}>
-            <span style={{color:'var(--accent)'}}>DDU Total: <strong>{fmtMoney(dduPlatformSum)}</strong></span>
-            <span style={{color:'var(--text-secondary)'}}>Total Spend: <strong>{fmtMoney(totalPlatformSum||parseFloat(form.total_spend)||0)}</strong></span>
-          </div>
-        )}
-
-        {totalPlatformSum===0&&(
-          <div className="form-group">
-            <label>Total Spend All Channels ($) <span style={{color:'var(--red)'}}>*</span></label>
-            <input type="number" value={form.total_spend} onChange={e=>setForm({...form,total_spend:e.target.value})} placeholder="0 — or fill platform totals above"/>
-          </div>
-        )}
-
-        {pct !== null && (
-          <div style={{padding:'10px 14px',borderRadius:'var(--radius)',background:status.bg,border:`1px solid ${status.color}`,marginBottom:14}}>
-            <div className="flex items-center justify-between">
-              <span style={{fontSize:12,color:status.color}}>DDU share: <strong>{pct}%</strong></span>
-              <span style={{padding:'2px 10px',borderRadius:100,background:status.bg,color:status.color,fontSize:11,fontWeight:600,fontFamily:'var(--font-mono)',border:`1px solid ${status.color}`}}>{status.label}</span>
-            </div>
-            <div style={{marginTop:8,height:6,background:'rgba(128,128,128,0.15)',borderRadius:3,overflow:'hidden',position:'relative'}}>
-              <div style={{position:'absolute',left:'20%',top:0,bottom:0,width:1,background:'var(--amber)',opacity:0.4}}/>
-              <div style={{position:'absolute',left:'50%',top:0,bottom:0,width:1,background:'var(--green)',opacity:0.4}}/>
-              <div style={{width:`${Math.min(100,pct)}%`,height:'100%',background:status.color,borderRadius:3,transition:'width 0.3s ease'}}/>
-            </div>
-          </div>
-        )}
-
-        <div className="form-group">
-          <label>Notes</label>
-          <textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}
-            rows={2} style={{resize:'vertical'}} placeholder="Context, platform breakdown details..."/>
-        </div>
-
-        <div className="flex gap-2">
-          <button className="btn btn-primary" onClick={handleSave} disabled={saving||!effectiveTotal}>
-            {saving ? 'Saving...' : isEdit ? 'Update Entry' : 'Log Spend'}
-          </button>
-          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── CLIENT ROW ───────────────────────────────────────────────
-function ClientRow({ client, entries, selectedWeek, strategistNames, onLog, canPause, isUpdating, onPause }) {
-  const [expanded, setExpanded] = useState(false)
-  const thisEntry = entries?.find(e => e.week_start === selectedWeek)
-  const isLogged = !!(thisEntry?.total_spend > 0)
-  const pct = isLogged ? ((thisEntry.ddu_spend / thisEntry.total_spend)*100).toFixed(1) : null
-  const status = pct !== null ? getStatus(parseFloat(pct)) : null
-  const locked = isFutureWeek(selectedWeek)
-
-  // Chart: last 8 weeks of entries
-  const chartData = entries?.slice(0,8).slice().reverse().map(e => ({
-    week: `W${weekNum(e.week_start)}`,
-    pct: e.total_spend > 0 ? parseFloat(((e.ddu_spend/e.total_spend)*100).toFixed(1)) : 0,
-    ddu: e.ddu_spend,
-    total: e.total_spend,
-  }))
-
-  return (
-    <div className="card" style={{padding:0,overflow:'hidden'}}>
-      <div style={{
-        padding:'12px 16px',
-        borderLeft:`4px solid ${isLogged ? status.color : 'var(--border)'}`,
-        cursor:'pointer',
-        background: isLogged ? `${status.color}04` : 'var(--bg-card)',
-      }} onClick={() => setExpanded(!expanded)}>
-        <div className="flex items-center justify-between" style={{flexWrap:'wrap',gap:8}}>
-          {/* Left: name + spend info */}
-          <div style={{flex:1,minWidth:0}}>
-            <div className="flex items-center gap-2" style={{flexWrap:'wrap',marginBottom:4}}>
-              <span style={{fontSize:14,fontWeight:700,color:'var(--text-primary)'}}>{client.name}</span>
-              <span
-                title={strategistNames.length ? `Creative Strategist: ${strategistNames.join(', ')}` : 'No Creative Strategist assigned in Client Roster'}
-                style={{fontSize:10,fontFamily:'var(--font-mono)',color:strategistNames.length?'var(--green)':'var(--text-muted)',
-                  background:strategistNames.length?'var(--green-dim)':'var(--bg)',padding:'2px 8px',borderRadius:100,
-                  border:`1px solid ${strategistNames.length?'var(--green)':'var(--border)'}`}}>
-                CS: {strategistNames.length ? strategistNames.join(', ') : 'Unassigned'}
-              </span>
-              {isLogged
-                ? <span style={{display:'inline-flex',alignItems:'center',gap:4,fontSize:10,fontFamily:'var(--font-mono)',fontWeight:600,color:status.color,background:status.bg,padding:'2px 8px',borderRadius:100}}>
-                    <Check size={9}/> Logged
-                  </span>
-                : <span style={{fontSize:10,fontFamily:'var(--font-mono)',color:'var(--text-muted)',background:'var(--bg)',padding:'2px 8px',borderRadius:100,border:'1px solid var(--border)'}}>
-                    Not logged
-                  </span>
-              }
-            </div>
-            {isLogged && (
-              <div style={{fontSize:11,color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>
-                DDU {fmtMoney(thisEntry.ddu_spend)} · Total {fmtMoney(thisEntry.total_spend)}
-                {PLATFORMS.filter(p=>thisEntry[p.key]>0).map(p=>(
-                  <span key={p.key} style={{color:p.color,marginLeft:8}}>{p.label} {fmtMoney(thisEntry[p.key])}</span>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Right: pct + actions */}
-          <div className="flex items-center gap-3" style={{flexShrink:0}}>
-            {pct !== null
-              ? <div style={{textAlign:'right'}}>
-                  <div style={{fontFamily:'var(--font-display)',fontSize:22,fontWeight:700,letterSpacing:'-0.03em',color:status.color}}>{pct}%</div>
-                  <div style={{fontSize:9,color:status.color,fontFamily:'var(--font-mono)'}}>{status.label}</div>
-                </div>
-              : <span style={{fontSize:11,color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>—</span>
-            }
-            {!locked && (
-              <button className={`btn btn-sm ${isLogged ? 'btn-ghost' : 'btn-primary'}`}
-                style={{fontSize:11,gap:4,flexShrink:0}}
-                onClick={e=>{e.stopPropagation(); onLog(client, thisEntry||null)}}>
-                {isLogged ? <><Edit2 size={11}/> Edit</> : '+ Log'}
-              </button>
-            )}
-            {canPause && (
-              <button className="btn btn-ghost btn-sm"
-                style={{fontSize:11,gap:4,flexShrink:0,color:'var(--text-muted)'}}
-                disabled={isUpdating}
-                title={`Pause ${client.name}`}
-                onClick={e=>{e.stopPropagation(); onPause(client)}}>
-                <Pause size={11}/> {isUpdating ? 'Pausing...' : 'Pause'}
-              </button>
-            )}
-            {locked && <span style={{fontSize:10,color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>Future</span>}
-            {expanded ? <ChevronUp size={15} color="var(--text-muted)"/> : <ChevronDown size={15} color="var(--text-muted)"/>}
-          </div>
-        </div>
-
-        {/* Progress bar */}
-        {pct !== null && (
-          <div style={{marginTop:8,height:4,background:'var(--border)',borderRadius:2,overflow:'hidden',position:'relative'}}>
-            <div style={{position:'absolute',left:'20%',top:0,bottom:0,width:1,background:'var(--amber)',opacity:0.5}}/>
-            <div style={{position:'absolute',left:'50%',top:0,bottom:0,width:1,background:'var(--green)',opacity:0.5}}/>
-            <div style={{width:`${Math.min(100,pct)}%`,height:'100%',background:status.color,borderRadius:2,transition:'width 0.4s ease'}}/>
-          </div>
-        )}
-      </div>
-
-      {/* Expanded: history chart */}
-      {expanded && (
-        <div style={{padding:'14px 16px',borderTop:'1px solid var(--border)',background:'var(--bg)'}}>
-          {/* This week platform breakdown */}
-          {isLogged && PLATFORMS.some(p=>thisEntry[p.key]>0) && (
-            <div style={{marginBottom:14}}>
-              <div className="card-label mb-2">This Entry — Platforms</div>
-              <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-                {PLATFORMS.filter(p=>thisEntry[p.key]>0).map(p=>(
-                  <div key={p.key} style={{padding:'7px 12px',borderRadius:'var(--radius)',background:'var(--bg-card)',border:'1px solid var(--border)',display:'flex',alignItems:'center',gap:8}}>
-                    <div style={{width:8,height:8,borderRadius:'50%',background:p.color}}/>
-                    <span style={{fontSize:12,color:'var(--text-secondary)'}}>{p.label}</span>
-                    <span style={{fontSize:13,fontWeight:600,fontFamily:'var(--font-mono)'}}>{fmtMoney(thisEntry[p.key])}</span>
-                  </div>
-                ))}
-              </div>
-              {thisEntry.notes && <p style={{fontSize:11,color:'var(--text-muted)',marginTop:8,fontStyle:'italic'}}>"{thisEntry.notes}"</p>}
-            </div>
-          )}
-
-          {/* History chart */}
-          {chartData?.length > 0 ? (
-            <>
-              <div className="card-label mb-2">DDU % History</div>
-              <ResponsiveContainer width="100%" height={100}>
-                <BarChart data={chartData} margin={{top:4,right:4,bottom:0,left:-20}}>
-                  <XAxis dataKey="week" tick={{fill:'var(--text-muted)',fontSize:10}} axisLine={false} tickLine={false}/>
-                  <YAxis domain={[0,100]} tick={{fill:'var(--text-muted)',fontSize:10}} axisLine={false} tickLine={false} tickFormatter={v=>`${v}%`}/>
-                  <Tooltip contentStyle={{background:'var(--bg-card)',border:'1px solid var(--border)',borderRadius:8,fontSize:11}}
-                    formatter={(v,n,p)=>[`${v}% (DDU ${fmtMoney(p.payload.ddu)} / Total ${fmtMoney(p.payload.total)})`,'DDU Share']}/>
-                  <ReferenceLine y={20} stroke="var(--amber)" strokeDasharray="4 4" strokeOpacity={0.5}/>
-                  <ReferenceLine y={50} stroke="var(--green)" strokeDasharray="4 4" strokeOpacity={0.5}/>
-                  <Bar dataKey="pct" radius={[3,3,0,0]}>
-                    {chartData.map((e,i)=><Cell key={i} fill={getStatus(e.pct).color} fillOpacity={0.8}/>)}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </>
-          ) : (
-            <p style={{fontSize:12,color:'var(--text-muted)'}}>No history yet. Log 2+ weeks to see trend.</p>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── PAUSED CLIENTS ──────────────────────────────────────────
-function PausedClientsPanel({ clients, entries, members, expanded, onToggle, canManage, updatingClientId, onUnpause }) {
-  if (!clients.length) return null
-
-  return (
-    <div style={{marginTop:20}}>
-      <button type="button" className="card"
-        aria-expanded={expanded}
-        aria-controls="paused-spend-clients"
-        onClick={onToggle}
-        style={{width:'100%',padding:'12px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',
-          gap:12,cursor:'pointer',color:'var(--text-secondary)',fontFamily:'var(--font-body)',textAlign:'left'}}>
-        <span className="flex items-center gap-2">
-          <EyeOff size={14}/>
-          <span style={{fontSize:12,fontWeight:600}}>Paused / past clients</span>
-          <span style={{padding:'2px 7px',borderRadius:100,background:'var(--bg)',border:'1px solid var(--border)',
-            fontSize:10,fontFamily:'var(--font-mono)',color:'var(--text-muted)'}}>{clients.length}</span>
-        </span>
-        <span className="flex items-center gap-2" style={{fontSize:11,color:'var(--text-muted)'}}>
-          {expanded ? 'Hide past clients' : 'Show past clients'}
-          {expanded ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
-        </span>
-      </button>
-
-      {expanded && (
-        <div id="paused-spend-clients" className="card" style={{padding:0,overflow:'hidden',marginTop:8}}>
-          <div style={{padding:'10px 16px',background:'var(--bg)',borderBottom:'1px solid var(--border)',
-            fontSize:11,color:'var(--text-muted)'}}>
-            Paused and past clients stay out of spend totals and the active tracker list. Their full spend history is preserved.
-          </div>
-          {clients.map((client,index)=>{
-            const clientEntries = entries[client.id]||[]
-            const latestEntry = clientEntries.find(entry=>entry.total_spend>0)
-            const strategistNames = getClientStrategistNames(client,members)
-            return (
-              <div key={client.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,
-                padding:'12px 16px',borderBottom:index<clients.length-1?'1px solid var(--border)':'none'}}>
-                <div style={{minWidth:0}}>
-                  <div className="flex items-center gap-2">
-                    <span style={{fontSize:13,fontWeight:600,color:'var(--text-secondary)'}}>{client.name}</span>
-                    <span style={{padding:'2px 7px',borderRadius:100,background:'var(--bg)',color:'var(--text-muted)',
-                      border:'1px solid var(--border)',fontSize:9,fontFamily:'var(--font-mono)'}}>Paused</span>
-                  </div>
-                  <div style={{fontSize:10,color:'var(--text-muted)',fontFamily:'var(--font-mono)',marginTop:3}}>
-                    CS: {strategistNames.length ? strategistNames.join(', ') : 'Unassigned'} ·{' '}
-                    {latestEntry
-                      ? `Last logged W${weekNum(latestEntry.week_start)} · DDU ${fmtMoney(latestEntry.ddu_spend)} / Total ${fmtMoney(latestEntry.total_spend)} · ${clientEntries.length} entr${clientEntries.length===1?'y':'ies'} saved`
-                      : 'No spend history logged'}
-                  </div>
-                </div>
-                {canManage && (
-                  <button type="button" className="btn btn-ghost btn-sm"
-                    disabled={updatingClientId===client.id}
-                    onClick={()=>onUnpause(client)}>
-                    <Play size={11}/> {updatingClientId===client.id ? 'Unpausing...' : 'Unpause'}
-                  </button>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── MAIN PAGE ─────────────────────────────────────────────────
 export default function SpendTracker() {
   const { profile, isManagement, isOps } = useAuth()
-  const [clients, setClients]   = useState([])
-  const [members, setMembers]   = useState([])
-  const [entries, setEntries]   = useState({})
-  const [loading, setLoading]   = useState(true)
-  const [logClient, setLogClient] = useState(null)
-  const [logExisting, setLogExisting] = useState(null)
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [csFilter, setCsFilter] = useState('all')
-  const [search, setSearch]     = useState('')
-  const [showPaused, setShowPaused] = useState(false)
-  const [updatingClientId, setUpdatingClientId] = useState(null)
-
-  const [viewMode, setViewMode] = useState('weekly') // 'weekly' | 'monthly'
-  // Default to last Monday — the standard logging day
-  const [selectedWeek, setSelectedWeek] = useState(() => toDateStr(getLastMonday()))
-  const [selectedMonth, setSelectedMonth] = useState(() => getMonthStart(new Date()))
+  const canManage = isManagement || isOps
+  // Keep existing page access; creative strategists have a focused roster-assigned view.
+  const companyView = canManage || profile?.position !== 'creative_strategist'
+  const [params, setParams] = useSearchParams()
+  const view = ['weekly', 'monthly', 'analytics'].includes(params.get('tab')) ? params.get('tab') : 'weekly'
+  const [data, setData] = useState({ clients: [], members: [], entries: [] })
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [week, setWeek] = useState(lastCompletedSpendWeek)
+  const [month, setMonth] = useState(() => dateKey(new Date()).slice(0, 7))
+  const [search, setSearch] = useState('')
+  const [strategist, setStrategist] = useState('all')
+  const [status, setStatus] = useState('all')
+  const [expanded, setExpanded] = useState(null)
+  const [logging, setLogging] = useState(null)
+  const [updating, setUpdating] = useState(null)
+  const currentWeek = shiftSpendWeek(lastCompletedSpendWeek(), 1)
 
   const load = useCallback(async () => {
-    if (!profile?.id) return
-    const next = await fetchSpendTrackerData()
-    setClients(next.clients)
-    setMembers(next.members)
-    setEntries(next.entries)
-    setLoading(false)
-  }, [profile?.id])
-
+    try { setData(await fetchSpendData(profile, companyView)); setError('') }
+    catch (loadError) { setError(loadError.message) }
+    finally { setLoading(false) }
+  }, [profile, companyView])
   useEffect(() => {
-    if (!profile?.id) return
     let cancelled = false
-
-    async function loadInitialData() {
-      const next = await fetchSpendTrackerData()
-      if (cancelled) return
-      setClients(next.clients)
-      setMembers(next.members)
-      setEntries(next.entries)
-      setLoading(false)
-    }
-
-    loadInitialData()
+    fetchSpendData(profile, companyView).then(next => { if (!cancelled) { setData(next); setError('') } })
+      .catch(loadError => { if (!cancelled) setError(loadError.message) })
+      .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [profile?.id])
+  }, [profile, companyView])
 
-  async function setClientPaused(client, isPaused) {
-    if (!isManagement && !isOps) return
-    if (isPaused && !confirm(`Pause "${client.name}"? It will be hidden from the active spend tracker, but its history will remain available below.`)) return
-
-    setUpdatingClientId(client.id)
-    const patch = isPaused
-      ? {is_archived:true}
-      : {is_active:true,is_archived:false}
-    const { data, error } = await supabase.from('clients')
-      .update(patch)
-      .eq('id',client.id)
-      .select('id,is_active,is_archived')
-
-    if (error) {
-      alert(`${isPaused ? 'Pause' : 'Unpause'} failed: ${error.message}`)
-      setUpdatingClientId(null)
-      return
-    }
-    if (!data?.length) {
-      alert(`${isPaused ? 'Pause' : 'Unpause'} did not apply — your account may not have permission to edit clients.`)
-      setUpdatingClientId(null)
-      return
-    }
-
-    setClients(prev=>prev.map(c=>c.id===client.id?{...c,...patch}:c))
-    setUpdatingClientId(null)
+  async function pauseClient(client, paused) {
+    if (!canManage || updating) return
+    if (paused && !confirm(`Pause "${client.name}"? It will be hidden from the active tracker. Its spend history will be preserved.`)) return
+    setUpdating(client.id)
+    const patch = paused ? { is_archived: true } : { is_active: true, is_archived: false }
+    try {
+      const { data: updated, error: updateError } = await supabase.from('clients').update(patch).eq('id', client.id).select('id,is_active,is_archived').single()
+      if (updateError) throw updateError
+      if (!updated) throw new Error('Client was not updated. Check your edit permissions.')
+      setData(current => ({ ...current, clients: current.clients.map(row => row.id === client.id ? { ...row, ...updated } : row) }))
+      setError('')
+    } catch (updateError) { setError(`${paused ? 'Pause' : 'Unpause'} failed: ${updateError.message}`) }
+    finally { setUpdating(null) }
   }
 
-  // Week navigation
-  function prevWeek() { setSelectedWeek(w => toDateStr(addWeeks(parseISODate(w), -1))) }
-  function nextWeek() {
-    const next = toDateStr(addWeeks(parseISODate(selectedWeek), 1))
-    if (!isFutureWeek(next)) setSelectedWeek(next)
-  }
-  const canGoNext = !isFutureWeek(toDateStr(addWeeks(parseISODate(selectedWeek), 1)))
-  function prevMonth() { setSelectedMonth(m=>addMonths(m,-1)) }
-  function nextMonth() {
-    const next=addMonths(selectedMonth,1)
-    if (next<=new Date()) setSelectedMonth(next)
-  }
-  const canGoNextMonth = addMonths(selectedMonth,1) <= new Date()
-  const isLastWeek = selectedWeek === toDateStr(getLastMonday())
-  const isThisWeek = isCurrentWeek(selectedWeek)
+  const baseClients = data.clients.filter(isActiveSpendClient).filter(client => (!search || client.name.toLowerCase().includes(search.toLowerCase()))
+    && (strategist === 'all' || getClientStrategistIds(client).includes(strategist)))
+  const pausedClients = data.clients.filter(client => !isActiveSpendClient(client))
+  const monthEnd = month ? dateKey(new Date(Number(month.slice(0, 4)), Number(month.slice(5)), 0)) : ''
+  const period = view === 'monthly' ? { start: `${month}-01`, end: monthEnd } : { start: week, end: week }
+  const baseIds = new Set(baseClients.map(client => client.id))
+  const selectedEntries = spendInPeriod(data.entries.filter(row => baseIds.has(row.client_id)), period)
+  const summary = summarizeSpend(selectedEntries)
+  const rows = baseClients.map(client => {
+    const history = data.entries.filter(entry => entry.client_id === client.id)
+    const periodEntries = spendInPeriod(history, period)
+    return { client, history, periodEntries, ...summarizeSpend(periodEntries) }
+  }).filter(row => status === 'all' || (status === 'unlogged' && (row.entries === 0 || row.incomplete > 0))
+    || (status === 'low' && row.share !== null && row.share < 20)
+    || (status === 'healthy' && row.share >= 20 && row.share < 50)
+    || (status === 'excellent' && row.share >= 50))
+    .sort((a, b) => Number(a.completeEntries > 0 && !a.incomplete) - Number(b.completeEntries > 0 && !b.incomplete) || (a.share ?? -1) - (b.share ?? -1) || a.client.name.localeCompare(b.client.name))
 
-  const activeClients = clients.filter(c => c.is_active!==false && !c.is_archived)
-  const pausedClients = clients.filter(c => c.is_active===false || c.is_archived)
-  const csMembers = members.filter(m => m.position==='creative_strategist')
-
-  // Monthly stats — sum all entries whose week_start falls in selectedMonth
-  const monthStart = toDateStr(getMonthStart(selectedMonth))
-  const monthEnd   = toDateStr(getMonthEnd(selectedMonth))
-  const monthEntries = activeClients.flatMap(cl =>
-    (entries[cl.id]||[]).filter(e => e.week_start >= monthStart && e.week_start <= monthEnd && e.total_spend > 0)
-      .map(e => ({...e, clientName: cl.name}))
-  )
-  const monthDDU   = monthEntries.reduce((s,e)=>s+(e.ddu_spend||0),0)
-  const monthTotal = monthEntries.reduce((s,e)=>s+(e.total_spend||0),0)
-  const monthAvgPct = monthTotal>0 ? ((monthDDU/monthTotal)*100).toFixed(1) : null
-  const monthAtRisk = activeClients.filter(cl=>{
-    const clEntries=(entries[cl.id]||[]).filter(e=>e.week_start>=monthStart&&e.week_start<=monthEnd&&e.total_spend>0)
-    if (!clEntries.length) return false
-    const tot=clEntries.reduce((s,e)=>s+e.total_spend,0)
-    const ddu=clEntries.reduce((s,e)=>s+e.ddu_spend,0)
-    return (ddu/tot)<0.2
-  }).length
-
-  // Stats for selected week
-  const weekEntries = activeClients.map(c => entries[c.id]?.find(e=>e.week_start===selectedWeek)).filter(e=>e?.total_spend>0)
-  const totalDDU   = weekEntries.reduce((s,e) => s+(e.ddu_spend||0), 0)
-  const totalAll   = weekEntries.reduce((s,e) => s+(e.total_spend||0), 0)
-  const avgPct     = weekEntries.length ? (weekEntries.reduce((s,e) => s+(e.ddu_spend/e.total_spend)*100, 0)/weekEntries.length).toFixed(1) : null
-  const atRisk     = weekEntries.filter(e => (e.ddu_spend/e.total_spend)<0.2).length
-  const loggedCount = weekEntries.length
-  const spendStatus = avgPct !== null ? getStatus(parseFloat(avgPct)) : null
-
-  // Filter + sort
-  const displayClients = activeClients
-  const filtered = activeClients.filter(c => {
-    if (search && !c.name.toLowerCase().includes(search.toLowerCase())) return false
-    // CS filter
-    if (csFilter !== 'all') {
-      const ids = getClientStrategistIds(c)
-      if (!ids.includes(csFilter)) return false
-    }
-    const e = entries[c.id]?.find(x=>x.week_start===selectedWeek)
-    const p = e?.total_spend>0 ? (e.ddu_spend/e.total_spend)*100 : null
-    if (statusFilter==='atrisk')   return p!==null && p<20
-    if (statusFilter==='healthy')  return p!==null && p>=20 && p<50
-    if (statusFilter==='excellent')return p!==null && p>=50
-    if (statusFilter==='unlogged') return !e || !e.total_spend
-    return true
-  }).sort((a,b) => {
-    const ea = entries[a.id]?.find(e=>e.week_start===selectedWeek)
-    const eb = entries[b.id]?.find(e=>e.week_start===selectedWeek)
-    const pa = ea?.total_spend>0 ? (ea.ddu_spend/ea.total_spend)*100 : null
-    const pb = eb?.total_spend>0 ? (eb.ddu_spend/eb.total_spend)*100 : null
-    // Unlogged first, then by pct ascending (worst first)
-    if (pa===null && pb!==null) return -1
-    if (pb===null && pa!==null) return 1
-    if (pa!==null && pb!==null) return pa - pb
-    return a.name.localeCompare(b.name)
-  })
-  const monthlyClients = activeClients.filter(c => {
-    if (search && !c.name.toLowerCase().includes(search.toLowerCase())) return false
-    if (csFilter !== 'all') {
-      const ids = getClientStrategistIds(c)
-      if (!ids.includes(csFilter)) return false
-    }
-    return true
-  })
-
-  return (
-    <>
-      <div className="page-header">
-        <div className="flex items-center justify-between" style={{flexWrap:'wrap',gap:10}}>
-          <div>
-            <h1 className="page-title">Spend Tracker</h1>
-            <p className="page-subtitle">Log every Monday for the prior week</p>
-          </div>
-
-          <div className="flex gap-2 items-center">
-            {/* View toggle */}
-            <div style={{display:'flex',border:'1.5px solid var(--border)',borderRadius:'var(--radius)',overflow:'hidden'}}>
-              <button onClick={()=>setViewMode('weekly')}
-                style={{padding:'7px 14px',border:'none',cursor:'pointer',fontSize:12,fontFamily:'var(--font-body)',
-                  background:viewMode==='weekly'?'var(--accent)':'transparent',
-                  color:viewMode==='weekly'?'#fff':'var(--text-secondary)',transition:'all 0.12s'}}>
-                Weekly
-              </button>
-              <button onClick={()=>setViewMode('monthly')}
-                style={{padding:'7px 14px',border:'none',cursor:'pointer',fontSize:12,fontFamily:'var(--font-body)',
-                  background:viewMode==='monthly'?'var(--accent)':'transparent',
-                  color:viewMode==='monthly'?'#fff':'var(--text-secondary)',transition:'all 0.12s'}}>
-                Monthly
-              </button>
-            </div>
-
-            {/* Week navigator */}
-            {viewMode==='weekly'&&(
-              <div style={{display:'flex',alignItems:'center',gap:0,border:'1.5px solid var(--border)',borderRadius:'var(--radius-lg)',overflow:'hidden',background:'var(--bg-card)',boxShadow:'var(--shadow-xs)'}}>
-                <button onClick={prevWeek}
-                  style={{padding:'8px 12px',border:'none',background:'transparent',cursor:'pointer',color:'var(--text-secondary)',display:'flex',alignItems:'center'}}>
-                  <ChevronLeft size={16}/>
-                </button>
-                <div style={{padding:'8px 16px',borderLeft:'1px solid var(--border)',borderRight:'1px solid var(--border)',textAlign:'center',minWidth:160}}>
-                  <div style={{fontSize:13,fontWeight:700,color:'var(--text-primary)'}}>W{weekNum(selectedWeek)} · {weekLabel(selectedWeek)}</div>
-                  <div style={{fontSize:10,fontFamily:'var(--font-mono)',marginTop:1,
-                    color:isLastWeek?'var(--green)':isThisWeek?'var(--amber)':'var(--text-muted)'}}>
-                    {isLastWeek?'✓ Target logging week':isThisWeek?'⚠ Current week':' Historical'}
-                  </div>
-                </div>
-                <button onClick={nextWeek} disabled={!canGoNext}
-                  style={{padding:'8px 12px',border:'none',background:'transparent',cursor:canGoNext?'pointer':'not-allowed',color:canGoNext?'var(--text-secondary)':'var(--border)',display:'flex',alignItems:'center'}}>
-                  <ChevronRight size={16}/>
-                </button>
-              </div>
-            )}
-
-            {/* Month navigator */}
-            {viewMode==='monthly'&&(
-              <div style={{display:'flex',alignItems:'center',gap:0,border:'1.5px solid var(--border)',borderRadius:'var(--radius-lg)',overflow:'hidden',background:'var(--bg-card)',boxShadow:'var(--shadow-xs)'}}>
-                <button onClick={prevMonth}
-                  style={{padding:'8px 12px',border:'none',background:'transparent',cursor:'pointer',color:'var(--text-secondary)',display:'flex',alignItems:'center'}}>
-                  <ChevronLeft size={16}/>
-                </button>
-                <div style={{padding:'8px 16px',borderLeft:'1px solid var(--border)',borderRight:'1px solid var(--border)',textAlign:'center',minWidth:160}}>
-                  <div style={{fontSize:13,fontWeight:700,color:'var(--text-primary)'}}>{monthLabel(selectedMonth)}</div>
-                  <div style={{fontSize:10,fontFamily:'var(--font-mono)',color:'var(--text-muted)',marginTop:1}}>Monthly overview</div>
-                </div>
-                <button onClick={nextMonth} disabled={!canGoNextMonth}
-                  style={{padding:'8px 12px',border:'none',background:'transparent',cursor:canGoNextMonth?'pointer':'not-allowed',color:canGoNextMonth?'var(--text-secondary)':'var(--border)',display:'flex',alignItems:'center'}}>
-                  <ChevronRight size={16}/>
-                </button>
-              </div>
-            )}
-          </div>
+  return <>
+    <div className="page-header"><h1 className="page-title">Spend Tracker</h1><p className="page-subtitle">Log every Monday for the prior week · track adoption of DDU creatives</p></div>
+    <div className="page-body">
+      <div className="spend-tabs" role="tablist" aria-label="Spend Tracker views">{[['weekly', 'Weekly logging'], ['monthly', 'Monthly overview'], ['analytics', 'Analytics']].map(([value, label]) => <button key={value} role="tab" aria-selected={view === value} onClick={() => setParams(value === 'weekly' ? {} : { tab: value })}>{label}</button>)}</div>
+      {error && <div role="alert" className="spend-error">{error} <button className="btn btn-ghost btn-sm" onClick={load}>Retry</button></div>}
+      {loading ? <div className="loading-screen" style={{ minHeight: 200, background: 'transparent' }}><div className="spinner" /></div> : error && !data.clients.length ? null : view === 'analytics' ? <SpendAnalytics clients={data.clients} entries={data.entries} members={data.members} canFilterTeam={canManage} /> : <>
+        <div className="spend-controls">
+          {view === 'weekly' ? <div className="spend-actions"><button className="btn btn-ghost btn-sm" aria-label="Previous logging week" onClick={() => setWeek(shiftSpendWeek(week, -1))}><ChevronLeft size={16} /></button><div><strong>Week of {weekLabel(week)}</strong><div className="spend-kpi-detail">{week === lastCompletedSpendWeek() ? 'Target logging week' : week === currentWeek ? 'Current week · in progress' : 'Historical week'}</div></div><button className="btn btn-ghost btn-sm" aria-label="Next logging week" disabled={week >= currentWeek} onClick={() => setWeek(shiftSpendWeek(week, 1))}><ChevronRight size={16} /></button>{week !== lastCompletedSpendWeek() && <button className="btn btn-ghost btn-sm" onClick={() => setWeek(lastCompletedSpendWeek())}>Latest due week</button>}</div> : <label className="spend-field">Month<input type="month" value={month} max={dateKey(new Date()).slice(0, 7)} onChange={e => e.target.value && setMonth(e.target.value)} /></label>}
+          <label className="spend-field">Search clients<input placeholder="Client name…" value={search} onChange={e => setSearch(e.target.value)} /></label>
+          {canManage && <label className="spend-field">Creative strategist<select value={strategist} onChange={e => setStrategist(e.target.value)}><option value="all">All strategists</option>{data.members.filter(member => member.position === 'creative_strategist').map(member => <option key={member.id} value={member.id}>{member.full_name}</option>)}</select></label>}
+          <label className="spend-field">Status<select value={status} onChange={e => setStatus(e.target.value)}><option value="all">All statuses</option><option value="unlogged">Not logged / incomplete</option><option value="low">Low share · below 20%</option><option value="healthy">Healthy · 20–49.9%</option><option value="excellent">Excellent · 50%+</option></select></label>
         </div>
-      </div>
+        <div className="spend-kpis"><SpendKpi label="Spend on DDU creatives" value={formatSpendMoney(summary.ddu)} /><SpendKpi label="Total client spend" value={formatSpendMoney(summary.total)} /><SpendKpi label="Weighted DDU share" value={summary.share === null ? '—' : `${summary.share.toFixed(1)}%`} detail="Total DDU spend ÷ total client spend" /><SpendKpi label={view === 'monthly' ? 'Clients with complete entries' : 'Clients logged'} value={`${summary.loggedClients} / ${baseClients.length}`} detail={`${summary.completeEntries} complete weekly entries · ${summary.incomplete} incomplete`} /></div>
+        <p className="spend-note">Totals reflect active clients matching the search and strategist filters, before the status filter. Zero spend counts as logged; missing or incomplete entries do not. {view === 'monthly' ? 'Weeks are grouped by their week-start date. A client counts when it has at least one complete weekly entry.' : ''}</p>
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}><div className="table-wrap"><table className="spend-table"><thead><tr><th>Client / strategist</th><th>DDU spend</th><th>Total spend</th><th>DDU share</th><th>Status</th><th>Actions</th></tr></thead><tbody>{rows.map(row => <Fragment key={row.client.id}><tr>
+          <td><button className="spend-client-link" aria-expanded={expanded === row.client.id} onClick={() => setExpanded(expanded === row.client.id ? null : row.client.id)}>{row.client.name}</button><div className="spend-kpi-detail">{getClientStrategistNames(row.client, data.members).join(', ') || 'No strategist assigned'}</div></td>
+          <td className="spend-money">{formatSpendMoney(row.ddu)}</td><td className="spend-money">{formatSpendMoney(row.total)}</td><td className="spend-money">{row.share === null ? '—' : `${row.share.toFixed(1)}%`}</td><td><span className="spend-chip" style={{ color: row.incomplete ? 'var(--text-muted)' : spendStatus(row.share).color, background: row.incomplete ? 'var(--bg)' : spendStatus(row.share).bg }}>{!row.entries ? 'Not logged' : row.incomplete ? 'Incomplete log' : row.total === 0 ? 'Zero spend logged' : spendStatus(row.share).label}</span>{view === 'monthly' && <div className="spend-kpi-detail">{row.completeEntries} complete weeks{row.incomplete ? ` · ${row.incomplete} incomplete` : ''}</div>}</td>
+          <td><div className="spend-actions">{view === 'weekly' && <button className={`btn btn-sm ${row.entries ? 'btn-ghost' : 'btn-primary'}`} onClick={() => setLogging({ client: row.client, existing: row.periodEntries[0], weekStart: week })}>{row.entries ? 'Edit' : 'Log spend'}</button>}<button className="btn btn-ghost btn-sm" onClick={() => setExpanded(expanded === row.client.id ? null : row.client.id)}>History</button>{canManage && <button className="btn btn-ghost btn-sm" title={`Pause ${row.client.name}`} disabled={!!updating} onClick={() => pauseClient(row.client, true)}><Pause size={12} /></button>}</div></td>
+        </tr>{expanded === row.client.id && <tr><td colSpan={6} style={{ padding: 0 }}><SpendHistory client={row.client} entries={row.history} onLog={setLogging} /></td></tr>}</Fragment>)}{!rows.length && <tr><td colSpan={6} className="spend-empty">No clients match these filters.</td></tr>}</tbody></table></div></div>
+        {!!pausedClients.length && <details className="card spend-paused" style={{ padding: 0 }}><summary>Paused / past clients ({pausedClients.length})</summary><p className="spend-note" style={{ padding: '0 16px' }}>Hidden from active logging totals. History is preserved and included in Analytics when current + past clients are selected.</p><div className="table-wrap"><table className="spend-table"><thead><tr><th>Client</th><th>Last logged</th><th>Saved entries</th><th>Actions</th></tr></thead><tbody>{pausedClients.map(client => {
+          const history = data.entries.filter(entry => entry.client_id === client.id)
+          return <Fragment key={client.id}><tr><td>{client.name}<div className="spend-kpi-detail">{getClientStrategistNames(client, data.members).join(', ') || 'Unassigned'}</div></td><td>{history[0] ? weekLabel(history[0].week_start) : 'No entries'}</td><td>{history.length}</td><td><div className="spend-actions"><button className="btn btn-ghost btn-sm" onClick={() => setExpanded(expanded === client.id ? null : client.id)}>History</button>{canManage && <button className="btn btn-ghost btn-sm" disabled={!!updating} onClick={() => pauseClient(client, false)}><Play size={12} />{updating === client.id ? 'Updating…' : 'Unpause'}</button>}</div></td></tr>{expanded === client.id && <tr><td colSpan={4} style={{ padding: 0 }}><SpendHistory client={client} entries={history} /></td></tr>}</Fragment>
+        })}</tbody></table></div></details>}
+      </>}
+    </div>
+    {logging && <SpendLogModal {...logging} onClose={() => setLogging(null)} onSave={load} />}
+  </>
+}
 
-      <div className="page-body">
-        {/* Stats */}
-        {viewMode==='weekly'?(
-          <div className="stat-row">
-            <div className="stat-box"><div className="stat-box-label">DDU Spend</div><div className="stat-box-value text-accent">{fmtMoney(totalDDU)}</div></div>
-            <div className="stat-box"><div className="stat-box-label">Total Spend</div><div className="stat-box-value">{fmtMoney(totalAll)}</div></div>
-            <div className="stat-box"><div className="stat-box-label">Avg DDU %</div><div className="stat-box-value" style={{color:spendStatus?.color||'var(--text-muted)'}}>{avgPct!==null?`${avgPct}%`:'—'}</div></div>
-            <div className="stat-box"><div className="stat-box-label">At Risk</div><div className="stat-box-value text-red">{atRisk}</div></div>
-            <div className="stat-box">
-              <div className="stat-box-label">Logged</div>
-              <div className="stat-box-value">
-                <span style={{color:loggedCount===displayClients.length?'var(--green)':loggedCount>0?'var(--amber)':'var(--text-primary)'}}>{loggedCount}</span>
-                <span style={{fontSize:14,color:'var(--text-muted)'}}> / {displayClients.length}</span>
-              </div>
-            </div>
-          </div>
-        ):(
-          <div className="stat-row">
-            <div className="stat-box"><div className="stat-box-label">Monthly DDU</div><div className="stat-box-value text-accent">{fmtMoney(monthDDU)}</div></div>
-            <div className="stat-box"><div className="stat-box-label">Monthly Total</div><div className="stat-box-value">{fmtMoney(monthTotal)}</div></div>
-            <div className="stat-box"><div className="stat-box-label">Avg DDU %</div>
-              <div className="stat-box-value" style={{color:monthAvgPct?getStatus(parseFloat(monthAvgPct)).color:'var(--text-muted)'}}>
-                {monthAvgPct?`${monthAvgPct}%`:'—'}
-              </div>
-            </div>
-            <div className="stat-box"><div className="stat-box-label">At Risk</div><div className="stat-box-value text-red">{monthAtRisk}</div></div>
-            <div className="stat-box"><div className="stat-box-label">Weeks Logged</div><div className="stat-box-value">{[...new Set(monthEntries.map(e=>e.week_start))].length}</div></div>
-          </div>
-        )}
-
-        {/* Legend */}
-        <div className="card mb-4" style={{padding:'10px 14px'}}>
-          <div className="flex items-center gap-4 flex-wrap">
-            <span style={{fontSize:10,color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>DDU % OF TOTAL</span>
-            {[{label:'At Risk',sub:'< 20%',color:'var(--red)',bg:'var(--red-dim)'},{label:'Healthy',sub:'20–50%',color:'var(--amber)',bg:'var(--amber-dim)'},{label:'Excellent',sub:'≥ 50%',color:'var(--green)',bg:'var(--green-dim)'}].map(t=>(
-              <div key={t.label} className="flex items-center gap-2">
-                <span style={{padding:'2px 10px',borderRadius:100,background:t.bg,color:t.color,fontSize:11,fontWeight:600,fontFamily:'var(--font-mono)'}}>{t.label}</span>
-                <span style={{fontSize:11,color:'var(--text-muted)'}}>{t.sub}</span>
-              </div>
-            ))}
-            <span style={{marginLeft:'auto',fontSize:11,color:'var(--text-muted)'}}>
-              Unlogged clients appear first · Worst DDU% next
-            </span>
-          </div>
-        </div>
-
-        {/* Filters */}
-        <div className="flex gap-3 mb-4 flex-wrap items-center">
-          <div className="tabs" style={{border:'none',marginBottom:0,flexWrap:'wrap'}}>
-            {[{k:'all',l:'All'},{k:'unlogged',l:'⬜ Not Logged'},{k:'atrisk',l:'🔴 At Risk'},{k:'healthy',l:'🟡 Healthy'},{k:'excellent',l:'🟢 Excellent'}]
-              .map(f=><button key={f.k} className={`tab ${statusFilter===f.k?'active':''}`} onClick={()=>setStatusFilter(f.k)}>{f.l}</button>)}
-          </div>
-          {(isManagement || isOps) && (
-            <select value={csFilter} onChange={e=>setCsFilter(e.target.value)} style={{width:'auto',fontSize:12}}>
-              <option value="all">All CS</option>
-              {csMembers.map(m=><option key={m.id} value={m.id}>{m.full_name}</option>)}
-            </select>
-          )}
-          <input value={search} onChange={e=>setSearch(e.target.value)}
-            placeholder="Search clients..." style={{width:'auto',fontSize:12,padding:'7px 12px',marginLeft:'auto'}}/>
-        </div>
-
-        {/* Client list */}
-        {loading
-          ? <div className="loading-screen" style={{minHeight:200,background:'transparent'}}><div className="spinner"/></div>
-          : viewMode==='weekly' ? (
-            <div style={{display:'flex',flexDirection:'column',gap:8}}>
-              {filtered.map(client=>(
-                <ClientRow key={client.id} client={client}
-                  entries={entries[client.id]||[]}
-                  selectedWeek={selectedWeek}
-                  strategistNames={getClientStrategistNames(client,members)}
-                  onLog={(c,e)=>{ setLogClient(c); setLogExisting(e||null) }}
-                  canPause={isManagement||isOps}
-                  isUpdating={updatingClientId===client.id}
-                  onPause={c=>setClientPaused(c,true)}/>
-              ))}
-              {filtered.length===0 && <div className="empty-state"><p>No clients match this filter.</p></div>}
-            </div>
-          ) : (
-            /* Monthly view */
-            <div className="card" style={{padding:0,overflow:'hidden'}}>
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Client</th>
-                      <th>Monthly DDU</th>
-                      <th>Monthly Total</th>
-                      <th>DDU %</th>
-                      <th>Trend</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {monthlyClients.map(client=>{
-                      const clientMonthEntries=(entries[client.id]||[]).filter(e=>e.week_start>=monthStart&&e.week_start<=monthEnd&&e.total_spend>0)
-                      const mDDU=clientMonthEntries.reduce((s,e)=>s+(e.ddu_spend||0),0)
-                      const mTotal=clientMonthEntries.reduce((s,e)=>s+(e.total_spend||0),0)
-                      const mPct=mTotal>0?((mDDU/mTotal)*100).toFixed(1):null
-                      const mStatus=mPct?getStatus(parseFloat(mPct)):null
-                      // Trend: compare to previous month
-                      const prevStart=toDateStr(getMonthStart(addMonths(selectedMonth,-1)))
-                      const prevEnd=toDateStr(getMonthEnd(addMonths(selectedMonth,-1)))
-                      const prevEntries=(entries[client.id]||[]).filter(e=>e.week_start>=prevStart&&e.week_start<=prevEnd&&e.total_spend>0)
-                      const prevTotal=prevEntries.reduce((s,e)=>s+e.total_spend,0)
-                      const prevDDU=prevEntries.reduce((s,e)=>s+e.ddu_spend,0)
-                      const prevPct=prevTotal>0?(prevDDU/prevTotal)*100:null
-                      const trend=mPct&&prevPct?parseFloat(mPct)-prevPct:null
-                      if (!mPct&&!clientMonthEntries.length&&search&&!client.name.toLowerCase().includes(search.toLowerCase())) return null
-                      return (
-                        <tr key={client.id}>
-                          <td>
-                            <div style={{fontWeight:600}}>{client.name}</div>
-                            <div style={{fontSize:10,color:'var(--text-muted)',fontFamily:'var(--font-mono)',marginTop:2}}>
-                              CS: {getClientStrategistNames(client,members).join(', ')||'Unassigned'}
-                            </div>
-                          </td>
-                          <td style={{fontFamily:'var(--font-mono)',color:'var(--accent)'}}>{mTotal>0?fmtMoney(mDDU):'—'}</td>
-                          <td style={{fontFamily:'var(--font-mono)'}}>{mTotal>0?fmtMoney(mTotal):'—'}</td>
-                          <td>
-                            {mPct?(
-                              <div>
-                                <div style={{fontFamily:'var(--font-display)',fontSize:15,fontWeight:700,color:mStatus.color}}>{mPct}%</div>
-                                <div style={{height:3,background:'var(--border)',borderRadius:2,marginTop:3,overflow:'hidden',width:60}}>
-                                  <div style={{width:`${Math.min(100,mPct)}%`,height:'100%',background:mStatus.color,borderRadius:2}}/>
-                                </div>
-                              </div>
-                            ):<span style={{color:'var(--text-muted)',fontSize:12}}>No data</span>}
-                          </td>
-                          <td>
-                            {trend!==null?(
-                              <span style={{fontSize:12,fontWeight:600,color:trend>0?'var(--green)':trend<0?'var(--red)':'var(--text-muted)'}}>
-                                {trend>0?'↑':'↓'} {Math.abs(trend).toFixed(1)}%
-                              </span>
-                            ):<span style={{color:'var(--text-muted)',fontSize:12}}>—</span>}
-                          </td>
-                          <td>
-                            {mStatus?(
-                              <span style={{padding:'2px 9px',borderRadius:100,fontSize:10,fontWeight:600,fontFamily:'var(--font-mono)',
-                                background:mStatus.bg,color:mStatus.color}}>{mStatus.label}</span>
-                            ):<span style={{color:'var(--text-muted)',fontSize:11}}>Not logged</span>}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )
-        }
-
-        {!loading && (
-          <PausedClientsPanel
-            clients={pausedClients}
-            entries={entries}
-            members={members}
-            expanded={showPaused}
-            onToggle={()=>setShowPaused(value=>!value)}
-            canManage={isManagement||isOps}
-            updatingClientId={updatingClientId}
-            onUnpause={client=>setClientPaused(client,false)}
-          />
-        )}
-      </div>
-
-      {logClient && (
-        <LogModal client={logClient} existing={logExisting}
-          weekStart={selectedWeek}
-          onClose={()=>{ setLogClient(null); setLogExisting(null) }}
-          onSave={load}/>
-      )}
-    </>
-  )
+function SpendHistory({ client, entries, onLog }) {
+  return <div className="spend-history">
+    <h3 style={{ fontSize: 14, margin: '0 0 12px' }}>{client.name} · saved weekly history</h3>
+    {!entries.length ? <p className="spend-note">No saved spend entries yet.</p> : <div className="table-wrap"><table>
+      <thead><tr><th>Week start</th><th>DDU spend</th><th>Total spend</th><th>Share</th><th>Notes / platforms</th>{onLog && <th>Edit</th>}</tr></thead>
+      <tbody>{entries.map(entry => <tr key={entry.id}>
+        <td>{weekLabel(entry.week_start)}<div className="spend-kpi-detail">{entry.week_start.slice(0, 4)}</div></td>
+        <td>{formatSpendMoney(entry.ddu_spend)}</td><td>{formatSpendMoney(entry.total_spend)}</td>
+        <td>{spendShare(entry) === null ? '—' : `${spendShare(entry).toFixed(1)}%`}</td>
+        <td style={{ whiteSpace: 'normal', minWidth: 220 }}>
+          <div>{entry.notes || 'No notes'}</div>
+          <details className="spend-platform-history"><summary>Platform breakdown</summary>
+            {SPEND_PLATFORMS.some(platform => spendNumber(entry[platform.key]) !== null || spendNumber(entry[platform.totalKey]) !== null) ? <>
+              <table><thead><tr><th>Platform</th><th>DDU spend</th><th>Total spend</th></tr></thead><tbody>{SPEND_PLATFORMS.map(platform => <tr key={platform.key}><td>{platform.label}</td><td>{formatSpendMoney(entry[platform.key])}</td><td>{formatSpendMoney(entry[platform.totalKey])}</td></tr>)}</tbody></table>
+              <p className="spend-note">Values as saved. Legacy breakdowns may not reconcile with headline totals. Other uses the same recorded amount in both columns; — means not recorded.</p>
+            </> : <p className="spend-note">No platform breakdown was saved for this entry.</p>}
+          </details>
+        </td>
+        {onLog && <td><button className="btn btn-ghost btn-sm" onClick={() => onLog({ client, existing: entry, weekStart: entry.week_start })}>Edit</button></td>}
+      </tr>)}</tbody>
+    </table></div>}
+  </div>
 }

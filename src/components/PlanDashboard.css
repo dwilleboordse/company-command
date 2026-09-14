@@ -1,0 +1,24 @@
+.plan-review-banner{display:flex;align-items:center;gap:10px;padding:13px 16px;border:1px solid var(--amber);border-radius:12px;background:var(--bg-card);font-size:13px;flex-wrap:wrap;margin-bottom:20px;color:var(--text-primary)}
+.plan-review-banner svg{color:var(--amber);flex:none}.plan-review-banner a{margin-left:auto;color:var(--accent);font-weight:600}
+.plan-review-overlay{z-index:1100;align-items:center;padding:20px}.plan-review-dialog{max-width:540px;border-radius:18px}
+.plan-review-dialog-heading{display:flex;justify-content:space-between;align-items:center;color:var(--accent)}
+.plan-review-dialog h2{font-size:23px;margin:10px 0 14px;line-height:1.3}.plan-review-dialog p{font-size:14px;line-height:1.6;margin:12px 0}
+.plan-review-dialog .plan-review-eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-top:20px}
+.plan-review-muted{color:var(--text-secondary);font-size:12px!important}.plan-review-dialog-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:22px}
+.plan-dashboard{margin-bottom:24px;padding:22px}.plan-dashboard-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.plan-dashboard-heading h2{font-size:17px;display:flex;align-items:center;gap:8px;margin:0 0 6px}.plan-dashboard-heading p{font-size:12px;color:var(--text-muted);margin:0;line-height:1.5}
+.plan-dashboard-heading a,.plan-dashboard-owner{color:var(--accent);font-size:13px;font-weight:600;text-decoration:none}.plan-dashboard-owner:hover{text-decoration:underline}
+.plan-dashboard-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:16px 0}
+.plan-dashboard-stat{padding:14px;border:1px solid var(--border);border-radius:10px;background:var(--bg-hover)}
+.plan-dashboard-stat strong{font-size:25px;display:block;line-height:1.2;margin-bottom:5px}.plan-dashboard-stat span{font-size:12px;color:var(--text-muted)}
+.plan-dashboard-status-line{display:flex;gap:9px;flex-wrap:wrap;margin:12px 0}.plan-dashboard-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;background:var(--bg-hover);color:var(--text-secondary);border:1px solid var(--border)}
+.plan-dashboard-badge.on_track{color:var(--green);border-color:var(--green)}.plan-dashboard-badge.at_risk,.plan-dashboard-badge.due,.plan-dashboard-badge.update_draft,.plan-dashboard-badge.draft{color:var(--amber);border-color:var(--amber)}
+.plan-dashboard-badge.blocked,.plan-dashboard-badge.missing,.plan-dashboard-badge.ended{color:var(--red);border-color:var(--red)}
+.plan-dashboard-filter{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;margin:18px 0 12px}.plan-dashboard-filter select{padding:8px 10px;border:1px solid var(--border);border-radius:7px;background:var(--bg-card);color:var(--text-primary);font:inherit}
+.plan-dashboard-table-wrap{overflow:auto;max-height:420px}.plan-dashboard-table{width:100%;border-collapse:collapse;text-align:left;font-size:12px;min-width:640px}
+.plan-dashboard-table th{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);font-weight:600;padding:10px;border-bottom:1px solid var(--border)}
+.plan-dashboard-table thead th{position:sticky;top:0;background:var(--bg-card);z-index:1}
+.plan-dashboard-table td{padding:13px 10px;border-bottom:1px solid var(--border);vertical-align:top;line-height:1.5}.plan-dashboard-table small{color:var(--text-muted);display:block;font-size:11px;margin-top:3px}
+.plan-dashboard-table .plan-dashboard-note{max-width:300px;white-space:pre-wrap;overflow-wrap:anywhere}.plan-dashboard-error{font-size:13px;color:var(--red);padding:14px;border:1px solid var(--red);border-radius:8px}
+.plan-dashboard-empty{font-size:13px;color:var(--text-muted);padding:16px 0}.plan-dashboard-own-body{display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap}.plan-dashboard-own-body p{font-size:13px;line-height:1.6;margin:8px 0}.plan-dashboard-own-body .plan-dashboard-own-copy{flex:1;min-width:200px}
+@media(max-width:650px){.plan-dashboard{padding:17px}.plan-dashboard-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.plan-review-banner a{margin-left:28px}.plan-review-dialog h2{font-size:20px}}

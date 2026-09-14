@@ -1,7 +1,9 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useLocation, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
-import { getMondayStr, today as todayStr } from '../lib/dates'
+import { today as todayStr } from '../lib/dates'
+import { PLAN_REVIEW_EVENT, planReviewState, planToday, planWeekStart, validateWeeklyReview } from '../lib/planReview'
 import {
   Target, ListChecks, Route, ShieldAlert, CheckCircle2,
   ChevronLeft, ChevronRight, Plus, X, Download,
@@ -350,15 +352,46 @@ const normalizeCheckpoints = (value = {}) => ({
 })
 const pulseLabel = (status) => status === 'off_track' ? 'Off track' : status === 'at_risk' ? 'At risk' : 'On track'
 
-function WeeklyPulse({ planId, userId }) {
-  const weekStart = getMondayStr(new Date())
+function LockedPlanSnapshot({ pulse }) {
+  const plan = pulse?.plan_snapshot
+  if (!pulse?.locked_at || !plan) return null
+  const checkpoints = normalizeCheckpoints(plan.checkpoints)
+  return <details style={{ marginTop: 12, fontSize: 12 }}>
+    <summary style={{ cursor: 'pointer', color: 'var(--gold)' }}>View the plan locked for this week</summary>
+    <div style={{ marginTop: 12, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+      <b>{plan.name || '100-day plan'}</b> · {plan.department || plan.role || ''}<br />
+      {fmtY(plan.start_date)} → {fmtY(plan.end_date)} · Confidence {plan.confidence ?? '—'}/10
+      {(Array.isArray(plan.objectives) ? plan.objectives : []).map((objective, index) => <div key={objective.id || index} style={{ marginTop: 12 }}>
+        <b>{index + 1}. {objective.statement || 'Untitled objective'}</b>
+        {objective.why && <p>{objective.why}</p>}
+        {(objective.keyResults || []).map((result, resultIndex) => <p key={result.id || resultIndex}>{result.metric || 'Key result'}: {result.baseline || '—'} → {result.target || '—'} {result.unit || ''}</p>)}
+        {(objective.initiatives || []).filter(Boolean).map((initiative, initiativeIndex) => <p key={initiativeIndex}>• {initiative}</p>)}
+      </div>)}
+      <p style={{ marginTop: 12 }}>Day 30: {checkpoints.d30 || '—'}<br />Day 60: {checkpoints.d60 || '—'}<br />Day 90: {checkpoints.d90 || '—'}</p>
+      {plan.risks?.blocker && <p>Plan blocker: {plan.risks.blocker}</p>}
+      {plan.risks?.need && <p>Needs: {plan.risks.need}</p>}
+      {plan.risks?.deps && <p>Dependencies: {plan.risks.deps}</p>}
+    </div>
+  </details>
+}
+
+function WeeklyPulse({ planId, userId, startDate, endDate }) {
+  const [weekStart, setWeekStart] = useState(() => planWeekStart())
   const emptyPulse = useMemo(() => ({
     milestone: '', metric_now: '', track_status: 'on_track', progress_note: '', blocker: '', next_commitment: '',
   }), [])
   const [pulse, setPulse] = useState(emptyPulse)
   const [history, setHistory] = useState([])
-  const [state, setState] = useState('idle')
+  const [state, setState] = useState('loading')
   const [message, setMessage] = useState('')
+  const [loadedWeek, setLoadedWeek] = useState(null)
+
+  useEffect(() => {
+    const refresh = () => setWeekStart(planWeekStart())
+    const timer = window.setInterval(refresh, 60 * 1000)
+    window.addEventListener('focus', refresh)
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh) }
+  }, [])
 
   const loadPulses = useCallback(async () => {
     if (!planId) return
@@ -369,6 +402,7 @@ function WeeklyPulse({ planId, userId }) {
       .order('week_start', { ascending: false })
       .limit(6)
     if (error) {
+      setState('error')
       setMessage(error.message)
       return
     }
@@ -376,6 +410,8 @@ function WeeklyPulse({ planId, userId }) {
     setHistory(rows)
     const current = rows.find(row => row.week_start === weekStart)
     setPulse(current ? { ...emptyPulse, ...current } : emptyPulse)
+    setLoadedWeek(weekStart)
+    setState('idle')
   }, [emptyPulse, planId, weekStart])
 
   useEffect(() => {
@@ -390,6 +426,7 @@ function WeeklyPulse({ planId, userId }) {
       .then(({ data, error }) => {
         if (cancelled) return
         if (error) {
+          setState('error')
           setMessage(error.message)
           return
         }
@@ -397,18 +434,25 @@ function WeeklyPulse({ planId, userId }) {
         setHistory(rows)
         const current = rows.find(row => row.week_start === weekStart)
         setPulse(current ? { ...emptyPulse, ...current } : emptyPulse)
+        setLoadedWeek(weekStart)
+        setState('idle')
       })
     return () => { cancelled = true }
   }, [emptyPulse, planId, weekStart])
 
-  const savePulse = async () => {
-    if (!planId || !userId) return
-    if (!pulse.progress_note.trim() && !pulse.next_commitment.trim()) {
-      setMessage('Add a progress note or next commitment before saving.')
+  const locked = Boolean(pulse.locked_at && pulse.week_start === weekStart)
+  const outsideCycle = !startDate || startDate > planToday() || (endDate && endDate < planToday())
+  const disabled = locked || outsideCycle || loadedWeek !== weekStart || state === 'loading' || state === 'saving'
+
+  const savePulse = async (lock = false) => {
+    if (!planId || !userId || disabled) return
+    const validation = lock ? validateWeeklyReview(pulse) : ''
+    if (validation) {
+      setState('error'); setMessage(validation)
       return
     }
     setState('saving'); setMessage('')
-    const { error } = await supabase.from('hundred_day_plan_weekly_pulses').upsert({
+    const { data, error } = await supabase.from('hundred_day_plan_weekly_pulses').upsert({
       plan_id: planId,
       user_id: userId,
       week_start: weekStart,
@@ -419,61 +463,74 @@ function WeeklyPulse({ planId, userId }) {
       blocker: pulse.blocker.trim(),
       next_commitment: pulse.next_commitment.trim(),
       submitted_at: new Date().toISOString(),
-    }, { onConflict: 'plan_id,week_start' })
+      locked_at: lock ? new Date().toISOString() : null,
+    }, { onConflict: 'plan_id,week_start' }).select('*').single()
     if (error) {
       setState('error'); setMessage(error.message)
       return
     }
-    setState('saved'); setMessage('Weekly pulse saved.')
-    await loadPulses()
+    setPulse({ ...emptyPulse, ...data })
+    setHistory(rows => [data, ...rows.filter(row => row.id !== data.id)].slice(0, 6))
+    setState('saved'); setMessage(lock ? 'Weekly update and reviewed plan snapshot locked.' : 'Draft saved. Review and lock it to complete this week’s check-in.')
+    window.dispatchEvent(new Event(PLAN_REVIEW_EVENT))
   }
 
   if (!planId) return null
 
   return (
-    <div className="hdp-pulse">
+    <div className="hdp-pulse" id="weekly-review" tabIndex={-1}>
       <div className="hdp-eyebrow">Weekly execution pulse · week of {fmtY(weekStart)}<span className="bar" /></div>
-      <p className="hdp-sub" style={{ marginBottom: 18 }}>A short, evidence-based update for your lead. Update it once each week.</p>
+      <p className="hdp-sub" style={{ marginBottom: 18 }}>Review your existing 100-day plan every Monday, then log progress and your next commitment. Locking freezes this week’s update and a snapshot of the plan you reviewed; your full plan remains editable for future weeks. Weeks follow Dubai time.</p>
+      {locked && <p className="hdp-save-status" style={{ marginBottom: 18 }}><Lock size={14} /> Locked {fmtY(pulse.locked_at)} · read-only for this week</p>}
+      {outsideCycle && <p className="hdp-sub" style={{ color: 'var(--gold)', marginBottom: 18 }}>{!startDate ? 'Set a start date in your plan before completing weekly reviews.' : startDate > planToday() ? 'Weekly updates start when your plan begins.' : 'Your plan has ended. Review the results with your lead and agree the next cycle before changing its dates.'}</p>}
+      <fieldset disabled={disabled} style={{ border: 0, minWidth: 0 }}>
       <div className="hdp-pulse-grid">
         <div className="hdp-field">
-          <label>Milestone in focus</label>
-          <input className="hdp-input" value={pulse.milestone} placeholder="The milestone you are moving this week" onChange={e => setPulse({ ...pulse, milestone: e.target.value })} />
+          <label htmlFor="pulse-milestone">Milestone in focus</label>
+          <input id="pulse-milestone" className="hdp-input" value={pulse.milestone} placeholder="The milestone you are moving this week" onChange={e => setPulse({ ...pulse, milestone: e.target.value })} />
         </div>
         <div className="hdp-field">
-          <label>Metric now</label>
-          <input className="hdp-input" value={pulse.metric_now} placeholder="Current result or leading indicator" onChange={e => setPulse({ ...pulse, metric_now: e.target.value })} />
+          <label htmlFor="pulse-metric">Metric now</label>
+          <input id="pulse-metric" className="hdp-input" value={pulse.metric_now} placeholder="Current result or leading indicator" onChange={e => setPulse({ ...pulse, metric_now: e.target.value })} />
         </div>
         <div className="hdp-field">
-          <label>Execution status</label>
-          <select className="hdp-select" value={pulse.track_status} onChange={e => setPulse({ ...pulse, track_status: e.target.value })}>
+          <label htmlFor="pulse-status">Execution status</label>
+          <select id="pulse-status" className="hdp-select" value={pulse.track_status} onChange={e => setPulse({ ...pulse, track_status: e.target.value })}>
             <option value="on_track">On track</option>
             <option value="at_risk">At risk</option>
             <option value="off_track">Off track</option>
           </select>
         </div>
         <div className="hdp-field">
-          <label>Blocker or ask</label>
-          <input className="hdp-input" value={pulse.blocker} placeholder="What needs escalation or help?" onChange={e => setPulse({ ...pulse, blocker: e.target.value })} />
+          <label htmlFor="pulse-blocker">Blocker or ask</label>
+          <input id="pulse-blocker" className="hdp-input" value={pulse.blocker} placeholder="What needs escalation or help?" onChange={e => setPulse({ ...pulse, blocker: e.target.value })} />
         </div>
       </div>
       <div className="hdp-field" style={{ marginBottom: 14 }}>
-        <label>Progress since last week</label>
-        <textarea className="hdp-area" value={pulse.progress_note} placeholder="What changed, shipped, or was learned?" onChange={e => setPulse({ ...pulse, progress_note: e.target.value })} />
+        <label htmlFor="pulse-progress">Progress since last week *</label>
+        <textarea id="pulse-progress" className="hdp-area" value={pulse.progress_note} placeholder="What changed, shipped, or was learned?" onChange={e => setPulse({ ...pulse, progress_note: e.target.value })} />
       </div>
       <div className="hdp-field" style={{ marginBottom: 14 }}>
-        <label>Next commitment</label>
-        <input className="hdp-input" value={pulse.next_commitment} placeholder="The concrete outcome you will deliver next" onChange={e => setPulse({ ...pulse, next_commitment: e.target.value })} />
+        <label htmlFor="pulse-next">Next commitment *</label>
+        <input id="pulse-next" className="hdp-input" value={pulse.next_commitment} placeholder="The concrete outcome you will deliver next" onChange={e => setPulse({ ...pulse, next_commitment: e.target.value })} />
       </div>
+      </fieldset>
       <div className="hdp-pulse-actions">
-        <span className="hdp-save-status" style={state === 'error' ? { color: 'var(--danger)' } : undefined}>{message}</span>
-        <button className="hdp-btn primary" disabled={state === 'saving'} onClick={savePulse}><Save size={14} /> {state === 'saving' ? 'Saving…' : 'Save weekly pulse'}</button>
+        <span className="hdp-save-status" role={state === 'error' ? 'alert' : 'status'} style={state === 'error' ? { color: 'var(--danger)' } : undefined}>{state === 'loading' ? 'Loading weekly updates…' : message}</span>
+        {!locked && <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button className="hdp-btn ghost" disabled={disabled} onClick={() => savePulse(false)}><Save size={14} /> Save draft</button>
+          <button className="hdp-btn primary" disabled={disabled} onClick={() => savePulse(true)}><Lock size={14} /> {state === 'saving' ? 'Saving…' : 'Lock weekly update'}</button>
+        </div>}
+        {state === 'error' && <button className="hdp-btn ghost" onClick={loadPulses}>Reload saved update</button>}
       </div>
+      {!locked && <p className="hdp-sub" style={{ fontSize: 11, marginTop: 12 }}>Fields marked * are required to lock. Once locked, this week’s update cannot be edited.</p>}
       {history.length > 0 && (
         <div className="hdp-pulse-history">
           {history.slice(0, 4).map(item => (
             <div className="hdp-pulse-history-item" key={item.id}>
-              <div className="week">Week of {fmtY(item.week_start)} · {pulseLabel(item.track_status)}</div>
+              <div className="week">Week of {fmtY(item.week_start)} · {item.locked_at ? 'Locked' : 'Draft / not locked'} · {pulseLabel(item.track_status)}</div>
               <div className="note">{item.progress_note || item.next_commitment || 'No note added.'}</div>
+              <LockedPlanSnapshot pulse={item} />
             </div>
           ))}
         </div>
@@ -484,16 +541,20 @@ function WeeklyPulse({ planId, userId }) {
 
 export default function HundredDayPlan() {
   const { profile, isManagement, isOps } = useAuth()
+  const location = useLocation()
+  const [searchParams, setSearchParams] = useSearchParams()
   const canSeeTeamPlans = isManagement || isOps
+  const selectedOwner = canSeeTeamPlans ? searchParams.get('owner') : null
   const [step, setStep] = useState(0);
   const [okrCfg, setOkrCfg] = useState({});       // department label → [{ id, objective, keyResults: [string,...] }]
   const [loadingPlan, setLoadingPlan] = useState(true);
+  const [planLoadError, setPlanLoadError] = useState('')
   const [saveStatus, setSaveStatus] = useState({ state: 'idle', at: null }); // 'idle' | 'saving' | 'saved' | 'error'
   const [viewMode, setViewMode] = useState('wizard');         // 'wizard' | 'summary'
   const [committedAt, setCommittedAt] = useState(null);       // ISO timestamp when last committed
   const [planId, setPlanId] = useState(null)
   const planStatusRef = useRef('draft');                      // current persisted status ('draft' | 'committed')
-  const [tab, setTab] = useState('mine');                     // 'mine' | 'team' — only relevant for mgmt/ops
+  const tab = canSeeTeamPlans && searchParams.get('view') === 'team' ? 'team' : 'mine'
 
   const [member, setMember] = useState({ name: "", role: "", department: "", startDate: "" });
   const [anchors, setAnchors] = useState([]);
@@ -501,6 +562,17 @@ export default function HundredDayPlan() {
   const [cps, setCps] = useState({ d30: "", d60: "", d90: "" });
   const [risk, setRisk] = useState({ blocker: "", need: "", deps: "" });
   const [confidence, setConfidence] = useState(6);
+  const skipInitialAutoSave = useRef(true)
+
+  useEffect(() => {
+    if (loadingPlan || tab !== 'mine' || viewMode !== 'summary' || location.hash !== '#weekly-review') return
+    const frame = window.requestAnimationFrame(() => {
+      const element = document.getElementById('weekly-review')
+      element?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      element?.focus({ preventScroll: true })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [loadingPlan, viewMode, tab, location.hash])
 
   const deptOkrs = okrCfg[member.department] || []
 
@@ -561,13 +633,18 @@ export default function HundredDayPlan() {
       })
 
       // 2) Load existing plan (if any)
-      const { data: planData } = await supabase
+      const { data: planData, error: planError } = await supabase
         .from('hundred_day_plans')
         .select('*')
         .eq('user_id', profile.id)
         .maybeSingle()
 
       if (cancel) return
+      if (planError) {
+        setPlanLoadError(planError.message)
+        setLoadingPlan(false)
+        return
+      }
 
       setOkrCfg(cfg)
 
@@ -609,10 +686,9 @@ export default function HundredDayPlan() {
   // Status defaults to whatever the plan currently is (tracked in planStatusRef).
   // Pass an explicit override (e.g. 'committed') from the Commit button.
   const savePlan = useCallback(async (overrideStatus) => {
-    if (!profile?.id) return
+    if (!profile?.id || loadingPlan || planLoadError) return false
     setSaveStatus({ state: 'saving' })
     const status = overrideStatus ?? planStatusRef.current
-    if (overrideStatus) planStatusRef.current = overrideStatus
     const payload = {
       user_id: profile.id,
       name: member.name || null,
@@ -635,16 +711,23 @@ export default function HundredDayPlan() {
     if (error) {
       console.error('Save plan failed:', error)
       setSaveStatus({ state: 'error', message: error.message || 'unknown error' })
+      return false
     } else {
+      planStatusRef.current = status
       setPlanId(data.id)
       setSaveStatus({ state: 'saved', at: Date.now() })
+      window.dispatchEvent(new Event(PLAN_REVIEW_EVENT))
+      return true
     }
-  }, [profile?.id, member, dates, anchors, objectives, cps, risk, confidence])
+  }, [profile?.id, loadingPlan, planLoadError, member, dates, anchors, objectives, cps, risk, confidence])
 
   // Debounced auto-save (1.2s after last edit) — preserves current status (draft or committed)
   const saveTimer = useRef(null)
   useEffect(() => {
-    if (!profile?.id || loadingPlan) return
+    if (!profile?.id || loadingPlan || planLoadError) return
+    // Loading a saved plan is not an edit. Apart from preserving its timestamps,
+    // this avoids remounting the weekly form just as somebody starts typing.
+    if (skipInitialAutoSave.current) { skipInitialAutoSave.current = false; return }
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => { savePlan() }, 1200)
     return () => clearTimeout(saveTimer.current)
@@ -732,6 +815,7 @@ export default function HundredDayPlan() {
     const [members, setMembers] = useState({})
     const [latestPulses, setLatestPulses] = useState({})
     const [loading, setLoading] = useState(true)
+    const [error, setError] = useState('')
     const [expanded, setExpanded] = useState(null)
     const [filter, setFilter] = useState('all')   // 'all' | 'committed' | 'draft'
     const [scope, setScope] = useState('current') // 'current' | 'past'
@@ -739,11 +823,14 @@ export default function HundredDayPlan() {
     useEffect(() => {
       (async () => {
         setLoading(true)
-        const [{ data: planRows }, { data: memberRows }, { data: pulseRows }] = await Promise.all([
+        const results = await Promise.all([
           supabase.from('hundred_day_plans').select('*').order('updated_at', { ascending: false }),
           supabase.from('profiles').select('id, full_name, position, role, avatar_url').eq('is_active', true),
           supabase.from('hundred_day_plan_weekly_pulses').select('*').order('week_start', { ascending: false }),
         ])
+        const failed = results.find(result => result.error)
+        if (failed) { setError(failed.error.message); setLoading(false); return }
+        const [{ data: planRows }, { data: memberRows }, { data: pulseRows }] = results
         const memberMap = {}
         ;(memberRows || []).forEach(m => { memberMap[m.id] = m })
         const pulseMap = {}
@@ -751,15 +838,16 @@ export default function HundredDayPlan() {
         setMembers(memberMap)
         setLatestPulses(pulseMap)
         setPlans(planRows || [])
+        if (selectedOwner) setExpanded((planRows || []).find(plan => plan.user_id === selectedOwner)?.id || null)
         setLoading(false)
       })()
     }, [])
 
-    const today = todayStr()
+    const today = planToday()
     const isCurrent = p => Boolean(members[p.user_id]) && (!p.end_date || p.end_date >= today)
     const currentPlans = plans.filter(isCurrent)
     const pastPlans = plans.filter(p => !isCurrent(p))
-    const scopedPlans = scope === 'current' ? currentPlans : pastPlans
+    const scopedPlans = selectedOwner ? plans.filter(plan => plan.user_id === selectedOwner) : scope === 'current' ? currentPlans : pastPlans
     const visible = scopedPlans.filter(p => filter === 'all' || p.status === filter)
     const committed = scopedPlans.filter(p => p.status === 'committed').length
     const drafts = scopedPlans.filter(p => p.status === 'draft').length
@@ -842,6 +930,7 @@ export default function HundredDayPlan() {
         L.push(`### Latest weekly execution pulse`)
         L.push(`- **Week:** ${pulse?.week_start || 'Not submitted'}`)
         L.push(`- **Status:** ${pulse ? pulseLabel(pulse.track_status) : 'Pulse due'}`)
+        L.push(`- **Weekly lock:** ${pulse?.locked_at || 'Not locked'}`)
         L.push(`- **Milestone:** ${pulse?.milestone || '—'}`)
         L.push(`- **Progress:** ${pulse?.progress_note || '—'}`)
         L.push(`- **Blocker / ask:** ${pulse?.blocker || '—'}`)
@@ -866,7 +955,7 @@ export default function HundredDayPlan() {
       const headers = [
         'Name','Role','Department','Status','Start','End','Confidence',
         'Anchored OKRs','Objectives','Key Results','Levers','Gameplans',
-        'D30','D60','D90','Latest Pulse Week','Execution Status','Pulse Progress','Pulse Blocker','Next Commitment','Blocker','Needs','Dependencies','Last Updated',
+        'D30','D60','D90','Latest Pulse Week','Execution Status','Weekly Locked At','Pulse Progress','Pulse Blocker','Next Commitment','Blocker','Needs','Dependencies','Last Updated',
       ]
       const rows = [headers]
       visible.forEach(p => {
@@ -899,6 +988,7 @@ export default function HundredDayPlan() {
           p.checkpoints?.d90 || p.checkpoints?.d75 || '',
           pulse?.week_start || '',
           pulse ? pulseLabel(pulse.track_status) : 'Pulse due',
+          pulse?.locked_at || '',
           pulse?.progress_note || '',
           pulse?.blocker || '',
           pulse?.next_commitment || '',
@@ -918,17 +1008,22 @@ export default function HundredDayPlan() {
         <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)' }}>Loading team plans…</span>
       </div>
     )
+    if (error) return <div className="hdp-empty" role="alert" style={{ color: 'var(--danger)' }}>Unable to load team plans: {error}</div>
 
     return (
       <div className="hdp-fade">
+        {selectedOwner && <div className="hdp-pulse-actions" style={{ paddingTop: 20 }}>
+          <span>Showing {members[selectedOwner]?.full_name || 'selected team member'}</span>
+          <button className="hdp-btn ghost" onClick={() => setSearchParams({ view: 'team' })}>View all team plans</button>
+        </div>}
         <div className="hdp-team-toolbar">
           <div className="hdp-team-stats">
             <b>{currentPlans.length}</b> current · <b>{pastPlans.length}</b> past · <b>{committed}</b> committed · <b>{drafts}</b> drafts
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
             <div className="hdp-tabs" style={{ margin: 0, border: 'none' }}>
-              <button className={scope === 'current' ? 'active' : ''} onClick={() => setScope('current')}>Current</button>
-              <button className={scope === 'past' ? 'active' : ''} onClick={() => setScope('past')}>Past plans ({pastPlans.length})</button>
+              <button className={scope === 'current' ? 'active' : ''} disabled={Boolean(selectedOwner)} onClick={() => setScope('current')}>Current</button>
+              <button className={scope === 'past' ? 'active' : ''} disabled={Boolean(selectedOwner)} onClick={() => setScope('past')}>Past plans ({pastPlans.length})</button>
             </div>
             <div className="hdp-tabs" style={{ margin: 0, border: 'none' }}>
               {['all', 'committed', 'draft'].map(f => (
@@ -961,7 +1056,7 @@ export default function HundredDayPlan() {
         </div>
 
         {visible.length === 0 ? (
-          <div className="hdp-empty">No plans match this filter.</div>
+          <div className="hdp-empty">{selectedOwner && scopedPlans.length === 0 ? 'This team member has not created a 100-day plan yet.' : 'No plans match this filter.'}</div>
         ) : visible.map(p => {
           const m = members[p.user_id] || {}
           const initials = (m.full_name || p.name || '?').split(' ').map(s => s[0]).slice(0,2).join('').toUpperCase()
@@ -969,7 +1064,7 @@ export default function HundredDayPlan() {
           const isOpen = expanded === p.id
           const anchoredObjs = (okrCfg[p.department] || []).filter(o => (p.anchored_objective_ids || []).includes(o.id))
           const pulse = latestPulses[p.id]
-          const pulseCurrent = pulse?.week_start === getMondayStr(new Date())
+          const review = planReviewState(p, pulse)
           return (
             <div key={p.id} className="hdp-team-row">
               <div className="hdp-team-row-h" onClick={() => setExpanded(isOpen ? null : p.id)}>
@@ -981,8 +1076,8 @@ export default function HundredDayPlan() {
                 <span className={`hdp-team-tag ${p.status === 'committed' ? 'committed' : 'draft'}`}>
                   {p.status === 'committed' ? '✓ Committed' : '· Draft'}
                 </span>
-                <span className={`hdp-pulse-tag ${pulseCurrent ? pulse.track_status : 'due'}`}>
-                  {pulseCurrent ? pulseLabel(pulse.track_status) : 'Pulse due'}
+                <span className={`hdp-pulse-tag ${review.locked ? review.status === 'blocked' ? 'off_track' : review.status : 'due'}`}>
+                  {review.label}{review.locked ? ' · Locked' : ''}
                 </span>
                 <div className="hdp-team-meta">
                   {p.department || '—'}<br />
@@ -1003,7 +1098,7 @@ export default function HundredDayPlan() {
                       <div className="hdp-empty" style={{ padding: 14 }}>No weekly pulse submitted yet.</div>
                     ) : (
                       <ul className="hdp-rev-list">
-                        <li>Week of {fmtY(pulse.week_start)} · {pulseLabel(pulse.track_status)}</li>
+                        <li>Week of {fmtY(pulse.week_start)} · {pulseLabel(pulse.track_status)} · {pulse.locked_at ? `Locked ${fmtY(pulse.locked_at)}` : 'Draft / not locked'}</li>
                         <li>Milestone: {pulse.milestone || '—'}</li>
                         <li>Metric now: {pulse.metric_now || '—'}</li>
                         <li>Progress: {pulse.progress_note || '—'}</li>
@@ -1011,6 +1106,7 @@ export default function HundredDayPlan() {
                         <li>Next commitment: {pulse.next_commitment || '—'}</li>
                       </ul>
                     )}
+                    <LockedPlanSnapshot pulse={pulse} />
                   </div>
 
                   <div className="hdp-rev-sec">
@@ -1107,7 +1203,7 @@ export default function HundredDayPlan() {
 
         <Track />
 
-        <WeeklyPulse planId={planId} userId={profile?.id} />
+        <WeeklyPulse planId={planId} userId={profile?.id} startDate={member.startDate} endDate={dates ? new Date(dates.d100).toISOString().slice(0, 10) : null} />
 
         <div className="hdp-rev-sec" style={{ marginTop: 24 }}>
           <h3>Anchored OKRs<span className="bar" /></h3>
@@ -1164,6 +1260,13 @@ export default function HundredDayPlan() {
     )
   }
 
+  if (planLoadError) return <div className="card" style={{ padding: 24 }} role="alert">
+    <h2>Unable to load your 100-day plan</h2>
+    <p style={{ margin: '12px 0' }}>{planLoadError}</p>
+    <p style={{ margin: '12px 0' }}>No changes have been saved. Reload before editing to protect your existing plan.</p>
+    <button className="btn btn-primary" onClick={() => window.location.reload()}>Reload plan</button>
+  </div>
+
   return (
     <div className="hdp">
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
@@ -1182,8 +1285,8 @@ export default function HundredDayPlan() {
 
         {canSeeTeamPlans && (
           <div className="hdp-tabs">
-            <button className={tab === 'mine' ? 'active' : ''} onClick={() => setTab('mine')}>My plan</button>
-            <button className={tab === 'team' ? 'active' : ''} onClick={() => setTab('team')}>Team plans</button>
+            <button className={tab === 'mine' ? 'active' : ''} onClick={() => setSearchParams({})}>My plan</button>
+            <button className={tab === 'team' ? 'active' : ''} onClick={() => setSearchParams({ view: 'team' })}>Team plans</button>
           </div>
         )}
 
@@ -1465,12 +1568,15 @@ export default function HundredDayPlan() {
                 <div style={{ display: "flex", gap: 11, flexWrap: "wrap" }}>
                   <button
                     className="hdp-btn primary"
+                    disabled={saveStatus.state === 'saving'}
                     onClick={async () => {
                       // Cancel any pending draft auto-save so it can't overwrite the commit
                       if (saveTimer.current) clearTimeout(saveTimer.current)
-                      await savePlan('committed')
-                      setCommittedAt(new Date().toISOString())
-                      setViewMode('summary')
+                      const saved = await savePlan('committed')
+                      if (saved) {
+                        setCommittedAt(new Date().toISOString())
+                        setViewMode('summary')
+                      }
                     }}
                   >
                     <Lock size={16} /> Commit plan

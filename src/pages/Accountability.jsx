@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { getClientStrategistIds } from '../lib/clientAssignments'
+import { countsAsCompletedPlanReview } from '../lib/planReview'
+import { isCompleteSpendEntry } from '../lib/spendAnalytics'
 import { ChevronLeft, ChevronRight, Check, Minus } from 'lucide-react'
 import './Accountability.css'
 
@@ -288,10 +290,10 @@ export default function Accountability() {
           .eq('is_active', true)
           .or('is_archived.is.null,is_archived.eq.false'),
         supabase.from('spend_entries')
-          .select('client_id,week_start,total_spend')
+          .select('client_id,week_start,total_spend,ddu_spend')
           .eq('week_start', spendWeek),
         supabase.from('hundred_day_plan_weekly_pulses')
-          .select('user_id,week_start,submitted_at')
+          .select('user_id,week_start,submitted_at,locked_at')
           .eq('week_start', selectedWeek),
         supabase.from('hundred_day_plan_cycle_pulses')
           .select('user_id,week_start,submitted_at')
@@ -308,7 +310,11 @@ export default function Accountability() {
       setLogs(map)
       setClients((clientResult.data || []).filter(client => client.is_active === true && client.is_archived !== true))
       setSpendEntries(spendResult.data || [])
-      setHundredDayPulses([...(weeklyPulseResult.data || []), ...(cyclePulseResult.data || [])])
+      // Preserve legacy completion history; new weekly reviews count only once finalized.
+      setHundredDayPulses([
+        ...(weeklyPulseResult.data || []).filter(countsAsCompletedPlanReview),
+        ...(cyclePulseResult.data || []),
+      ])
       ;[memberResult, logResult, clientResult, spendResult, weeklyPulseResult, cyclePulseResult].forEach(result => {
         if (result.error) console.error('Accountability load failed:', result.error.message)
       })
@@ -353,7 +359,7 @@ export default function Accountability() {
     const spendWeek = toDateStr(addWeeks(parseISODate(selectedWeek), -1))
     const loggedClientIds = new Set(
       spendEntries
-        .filter(entry => Number(entry.total_spend) > 0)
+        .filter(isCompleteSpendEntry)
         .map(entry => entry.client_id)
     )
     const result = {}
@@ -496,7 +502,7 @@ export default function Accountability() {
             <b style={{ color: 'var(--text-primary)' }}>Spend Tracker:</b> Creative Strategists receive a check when every active assigned client has prior-week spend logged.
           </span>
           <span>
-            <b style={{ color: 'var(--text-primary)' }}>100-Day Plan:</b> checks automatically when the team member saves their weekly pulse for the selected week.
+            <b style={{ color: 'var(--text-primary)' }}>100-Day Plan:</b> checks automatically when the team member locks their weekly update. Historical completion before September 14 is preserved.
           </span>
           {!monthlyVisible && (
             <span style={{ color: 'var(--accent)' }}>
