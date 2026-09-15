@@ -1,0 +1,34 @@
+.weekly-health-card{padding:22px}
+.weekly-health-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.weekly-health-heading h2{display:flex;align-items:center;gap:8px;font-size:17px;margin:0 0 6px}
+.weekly-health-heading h2 svg{color:var(--accent)}
+.weekly-health-heading p{font-size:12px;color:var(--text-muted);line-height:1.5;margin:0}
+.weekly-health-status{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;color:var(--text-secondary)}
+.weekly-health-status.is-complete{color:var(--green);border-color:var(--green)}
+.weekly-health-status.is-due{color:var(--amber);border-color:var(--amber)}
+.weekly-health-counts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.weekly-health-review{display:flex;align-items:center;gap:12px;padding:16px;border:1px solid var(--border);border-radius:10px;background:var(--bg-hover);min-width:0}
+.weekly-health-review>svg{flex:none;color:var(--accent)}
+.weekly-health-review.is-complete>svg{color:var(--green)}
+.weekly-health-review-copy{flex:1;min-width:0}
+.weekly-health-review-copy strong{display:block;font-size:13px;margin-bottom:4px}
+.weekly-health-review-copy span{display:block;font-size:19px;font-weight:650}
+.weekly-health-review-copy small{display:block;color:var(--text-muted);font-size:11px;line-height:1.5;margin-top:4px}
+.weekly-health-review>a{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:var(--accent);flex:none;padding:7px 0}
+.weekly-health-review>a:hover{text-decoration:underline}
+.weekly-health-note{font-size:12px;line-height:1.6;color:var(--text-muted);margin:14px 0 0}
+.weekly-health-unavailable{display:flex;align-items:center;gap:10px;color:var(--text-secondary);padding:14px;border:1px solid var(--border);border-radius:9px}
+.weekly-health-unavailable>svg{flex:none;color:var(--amber)}
+.weekly-health-unavailable p{flex:1;font-size:13px;line-height:1.6;margin:0}
+.weekly-health-unavailable a{color:var(--accent)}
+.weekly-health-modal-open{overflow:hidden}
+.weekly-health-overlay{z-index:1090;align-items:center;padding:20px}
+.weekly-health-dialog{max-width:600px;border-radius:18px;max-height:calc(100dvh - 40px);overflow:auto}
+.weekly-health-dialog-heading{display:flex;justify-content:space-between;align-items:center;color:var(--accent)}
+.weekly-health-dialog .weekly-health-eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin:20px 0 10px}
+.weekly-health-dialog h2{font-size:23px;line-height:1.3;margin:0 0 14px}
+.weekly-health-dialog>p:not(.weekly-health-eyebrow):not(.weekly-health-note){font-size:14px;line-height:1.6;color:var(--text-secondary);margin:0 0 20px}
+.weekly-health-dialog .weekly-health-counts{grid-template-columns:1fr}
+.weekly-health-dialog-actions{display:flex;justify-content:flex-end;margin-top:20px}
+.weekly-health-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@media(max-width:700px){.weekly-health-card{padding:17px}.weekly-health-counts{grid-template-columns:1fr}.weekly-health-heading{gap:10px}.weekly-health-unavailable{align-items:flex-start;flex-wrap:wrap}.weekly-health-unavailable p{min-width:180px}.weekly-health-dialog h2{font-size:20px}}

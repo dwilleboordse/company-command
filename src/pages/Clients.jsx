@@ -1,508 +1,327 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { Archive, Check, Edit2, Plus, Trash2, X } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
+import { fetchAllRows } from '../lib/reportingData'
+import { parseReportingDate } from '../lib/reportingPeriods'
 import { packageFormValues, packagePayload, validateClientPackage } from '../lib/clientPackage'
+import { HEALTH_CONFIG, HEALTH_REVIEW_EVENT, healthCurrentWeek, healthDueWeek, healthEligibleEntities, healthScore, healthWeekOptions, healthWeekSummary, isHealthComplete, isHealthEntityActive } from '../lib/healthWeekly'
+import { fetchHealthData, saveHealthEntry } from '../lib/healthData'
 import ClientPackageFields from '../components/ClientPackageFields'
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, RadarChart, Radar, PolarGrid, PolarAngleAxis } from 'recharts'
-import { Plus, Edit2, Trash2, ChevronDown, ChevronUp, TrendingDown, TrendingUp, Minus, Check, X } from 'lucide-react'
+import HealthAnalytics from '../components/HealthAnalytics'
+import './Clients.css'
 
-const RISK_COLORS = { Low:'var(--green)', Medium:'var(--amber)', High:'var(--red)', Leaving:'#7c3aed' }
-const RISK_BG = { Low:'var(--green-dim)', Medium:'var(--amber-dim)', High:'var(--red-dim)', Leaving:'rgba(124,58,237,0.12)' }
-const SCORE_FIELDS = [
-  { key:'performance_health', label:'Performance & Results', short:'Perf' },
-  { key:'creative_strategy', label:'Creative Strategy Impact', short:'Creative' },
-  { key:'execution_delivery', label:'Execution & Delivery', short:'Delivery' },
-  { key:'strategic_alignment', label:'Strategic Alignment', short:'Strategy' },
-  { key:'communication', label:'Communication & Relationship', short:'Comms' },
-]
-
-function getMonday() {
-  const d=new Date(),day=d.getDay(),diff=d.getDate()-day+(day===0?-6:1)
-  const m=new Date(d);m.setDate(diff);m.setHours(0,0,0,0);return m
+const CONFIG = HEALTH_CONFIG.client
+const RISK_COLORS = { Low: 'var(--green)', Medium: 'var(--amber)', High: 'var(--red)', Leaving: '#7c3aed' }
+const RISK_BG = { Low: 'var(--green-dim)', Medium: 'var(--amber-dim)', High: 'var(--red-dim)', Leaving: 'rgba(124,58,237,0.12)' }
+const RISK_ORDER = { Leaving: 0, High: 1, Medium: 2, Low: 3 }
+const legacyWeek = value => parseReportingDate(value)?.getDay() !== 1
+const weekText = value => {
+  const date = parseReportingDate(value)
+  return date ? `${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}${legacyWeek(value) ? ' · legacy date' : ''}` : value
 }
-function fmt(d) { return d instanceof Date?d.toISOString().split('T')[0]:d }
-function weekStart() { return fmt(getMonday()) }
+const scoreText = entry => healthScore('client', entry) === null ? '—' : healthScore('client', entry).toFixed(1)
 
-function avg(entry) {
-  if (!entry) return 0
-  const vals=SCORE_FIELDS.map(f=>parseFloat(entry[f.key])||0)
-  return vals.some(v=>v>0)?(vals.reduce((a,b)=>a+b,0)/vals.filter(v=>v>0).length).toFixed(1):0
-}
-
-function ScoreBar({ value }) {
-  const pct=(value/5)*100
-  const color=value>=4?'var(--green)':value>=3?'var(--amber)':'var(--red)'
-  return (
-    <div style={{display:'flex',alignItems:'center',gap:8}}>
-      <div style={{flex:1,height:4,background:'var(--border)',borderRadius:2,overflow:'hidden'}}>
-        <div style={{width:`${pct}%`,height:'100%',background:color,borderRadius:2,transition:'width 0.4s ease'}}/>
-      </div>
-      <span style={{fontSize:11,fontFamily:'var(--font-mono)',color:'var(--text-secondary)',width:20,textAlign:'right'}}>{value||'—'}</span>
-    </div>
-  )
+function useClientDialogFocus(onClose, saving) {
+  const dialogRef = useRef(null)
+  const current = useRef({ onClose, saving })
+  useEffect(() => { current.current = { onClose, saving } }, [onClose, saving])
+  useEffect(() => {
+    const previousFocus = document.activeElement
+    const dialog = dialogRef.current
+    if (!dialog) return undefined
+    const focusable = () => [...dialog.querySelectorAll('button, input, select, textarea, a[href], [tabindex]')]
+      .filter(element => !element.matches(':disabled') && element.tabIndex >= 0 && element.getClientRects().length > 0)
+    ;(dialog.querySelector('[data-client-dialog-focus]') || focusable()[0] || dialog).focus()
+    function handleKey(event) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        if (!current.current.saving) current.current.onClose()
+      }
+      if (event.key !== 'Tab') return
+      const elements = focusable()
+      if (!elements.length) { event.preventDefault(); dialog.focus(); return }
+      const first = elements[0], last = elements[elements.length - 1]
+      if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) { event.preventDefault(); last.focus() }
+      else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) { event.preventDefault(); first.focus() }
+    }
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('keydown', handleKey)
+      if (previousFocus?.isConnected && typeof previousFocus.focus === 'function') previousFocus.focus()
+    }
+  }, [])
+  return dialogRef
 }
 
 function RiskBadge({ risk }) {
-  if (!risk) return null
-  return <span style={{display:'inline-flex',alignItems:'center',padding:'3px 10px',borderRadius:100,fontSize:11,fontWeight:600,background:RISK_BG[risk],color:RISK_COLORS[risk],fontFamily:'var(--font-mono)'}}>{risk}</span>
+  return risk ? <span className="client-health-badge" style={{ color: RISK_COLORS[risk] || 'var(--text-muted)', background: RISK_BG[risk] || 'var(--bg)' }}>{risk}</span> : <span className="client-health-note">Risk not set</span>
 }
 
-// ── SCORE ENTRY MODAL ────────────────────────────────────────
-function EntryModal({ client, existing, onClose, onSave }) {
+function ScoreDetails({ entry }) {
+  return <div className="client-health-scores">{CONFIG.fields.map(field => {
+    const value = Number(entry?.[field.key])
+    const valid = Number.isFinite(value) && value >= 1 && value <= 5
+    return <div key={field.key}><span title={field.label}>{field.short}</span><strong style={{ color: !valid ? 'var(--text-muted)' : value >= 4 ? 'var(--green)' : value >= 3 ? 'var(--amber)' : 'var(--red)' }}>{valid ? value : '—'}<small> / 5</small></strong></div>
+  })}</div>
+}
+
+function EntryModal({ client, existing, week, onClose, onSave }) {
   const { profile } = useAuth()
-  const ws = weekStart()
-  const [form, setForm] = useState({
-    performance_health:existing?.performance_health||0,
-    creative_strategy:existing?.creative_strategy||0,
-    execution_delivery:existing?.execution_delivery||0,
-    strategic_alignment:existing?.strategic_alignment||0,
-    communication:existing?.communication||0,
-    churn_risk:existing?.churn_risk||'Low',
-    notes:existing?.notes||'',
-  })
-  const [saving, setSaving] = useState(false)
-
-  async function handleSave() {
-    setSaving(true)
-    await supabase.from('client_health_entries').upsert({
-      client_id:client.id, week_start:ws, ...form,
-      entered_by:profile?.id, updated_at:new Date().toISOString()
-    }, { onConflict:'client_id,week_start' })
-    onSave(); setSaving(false); onClose()
-  }
-
-  const score=avg(form)
-  const status=score>=4?getStatus('green'):score>=3?getStatus('amber'):getStatus('red')
-
-  function getStatus(s) { return {green:{color:'var(--green)',bg:'var(--green-dim)'},amber:{color:'var(--amber)',bg:'var(--amber-dim)'},red:{color:'var(--red)',bg:'var(--red-dim)'}}[s] }
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" style={{maxWidth:520}} onClick={e=>e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="modal-title" style={{marginBottom:0}}>{client.name} — Score</h2>
-          {score>0&&<div style={{textAlign:'right'}}>
-            <div style={{fontFamily:'var(--font-display)',fontSize:28,fontWeight:700,letterSpacing:'-0.03em',color:score>=4?'var(--green)':score>=3?'var(--amber)':'var(--red)'}}>{score}</div>
-            <div style={{fontSize:10,color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>avg score</div>
-          </div>}
-        </div>
-        <p style={{fontSize:11,color:'var(--text-muted)',fontFamily:'var(--font-mono)',marginBottom:16}}>Week of {ws} · Scores saved first, then add actions separately</p>
-
-        {SCORE_FIELDS.map(f=>(
-          <div key={f.key} className="form-group">
-            <label>{f.label}</label>
-            <div style={{display:'flex',gap:8}}>
-              {[1,2,3,4,5].map(n=>(
-                <button key={n} onClick={()=>setForm({...form,[f.key]:n})}
-                  style={{flex:1,padding:'10px 0',borderRadius:'var(--radius)',border:`2px solid ${form[f.key]===n?'var(--accent)':'var(--border)'}`,background:form[f.key]===n?'var(--accent-dim)':'var(--bg-input)',color:form[f.key]===n?'var(--accent)':'var(--text-secondary)',fontFamily:'var(--font-display)',fontWeight:700,fontSize:15,cursor:'pointer',transition:'all 0.15s'}}>
-                  {n}
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
-
-        <div className="form-group">
-          <label>Churn Risk</label>
-          <div style={{display:'flex',gap:8}}>
-            {['Low','Medium','High','Leaving'].map(r=>(
-              <button key={r} onClick={()=>setForm({...form,churn_risk:r})}
-                style={{flex:1,padding:'8px 4px',borderRadius:'var(--radius)',border:`2px solid ${form.churn_risk===r?RISK_COLORS[r]:'var(--border)'}`,background:form.churn_risk===r?RISK_BG[r]:'var(--bg-input)',color:form.churn_risk===r?RISK_COLORS[r]:'var(--text-secondary)',fontSize:11,fontWeight:600,cursor:'pointer',transition:'all 0.15s',fontFamily:'var(--font-mono)'}}>
-                {r}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="form-group">
-          <label>Notes / Observations</label>
-          <textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} rows={3} placeholder="CS sentiment, client feedback, context..." style={{resize:'vertical'}}/>
-        </div>
-
-        <div className="flex gap-2 mt-2">
-          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>{saving?'Saving...':'Save Scores'}</button>
-          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── ACTIONS PANEL ────────────────────────────────────────────
-function ActionsPanel({ client, entry }) {
-  const { profile } = useAuth()
-  const [actions, setActions] = useState([])
-  const [loaded, setLoaded] = useState(false)
-  const [adding, setAdding] = useState(false)
-  const [form, setForm] = useState({ action_text:'', owner:'', due_date:'' })
-  const [saving, setSaving] = useState(false)
-
-  useEffect(() => { if (entry?.id) load() }, [entry?.id])
-
-  async function load() {
-    const { data } = await supabase.from('client_actions').select('*').eq('health_entry_id', entry.id).order('created_at')
-    setActions(data||[])
-    setLoaded(true)
-  }
-
-  async function addAction() {
-    if (!form.action_text.trim()) return
-    setSaving(true)
-    await supabase.from('client_actions').insert({
-      client_id:client.id, health_entry_id:entry.id,
-      action_text:form.action_text, owner:form.owner||null, due_date:form.due_date||null,
-      created_by:profile?.id
-    })
-    setForm({action_text:'',owner:'',due_date:''})
-    setSaving(false); setAdding(false); load()
-  }
-
-  async function toggleDone(id, isDone) {
-    await supabase.from('client_actions').update({is_done:!isDone}).eq('id',id)
-    setActions(prev=>prev.map(a=>a.id===id?{...a,is_done:!isDone}:a))
-  }
-
-  async function deleteAction(id) {
-    await supabase.from('client_actions').delete().eq('id',id)
-    setActions(prev=>prev.filter(a=>a.id!==id))
-  }
-
-  async function updateAction(id, text) {
-    await supabase.from('client_actions').update({action_text:text}).eq('id',id)
-    setActions(prev=>prev.map(a=>a.id===id?{...a,action_text:text}:a))
-  }
-
-  if (!entry) return null
-
-  return (
-    <div style={{padding:'14px 16px',borderTop:'1px solid var(--border)',background:'var(--bg)'}}>
-      <div className="flex items-center justify-between mb-3">
-        <div className="card-label" style={{marginBottom:0}}>Actions to Improve</div>
-        <button className="btn btn-primary btn-sm" onClick={()=>setAdding(!adding)}>
-          <Plus size={12}/> Add Action
-        </button>
-      </div>
-
-      {adding && (
-        <div className="card mb-3" style={{padding:14}}>
-          <div className="form-group"><label>Action</label>
-            <input value={form.action_text} onChange={e=>setForm({...form,action_text:e.target.value})} placeholder="What needs to happen?" autoFocus onKeyDown={e=>e.key==='Enter'&&addAction()}/>
-          </div>
-          <div className="grid-2">
-            <div className="form-group"><label>Owner</label><input value={form.owner} onChange={e=>setForm({...form,owner:e.target.value})} placeholder="Who owns this?"/></div>
-            <div className="form-group"><label>Due Date</label><input type="date" value={form.due_date} onChange={e=>setForm({...form,due_date:e.target.value})}/></div>
-          </div>
-          <div className="flex gap-2">
-            <button className="btn btn-primary btn-sm" onClick={addAction} disabled={saving}>{saving?'Saving...':'Add'}</button>
-            <button className="btn btn-ghost btn-sm" onClick={()=>setAdding(false)}>Cancel</button>
-          </div>
-        </div>
-      )}
-
-      {actions.length===0&&!adding&&<p style={{fontSize:12,color:'var(--text-muted)'}}>No actions logged yet. Add actions to track improvements.</p>}
-
-      {actions.map(action=>(
-        <ActionRow key={action.id} action={action} onToggle={toggleDone} onDelete={deleteAction} onUpdate={updateAction}/>
-      ))}
-    </div>
-  )
-}
-
-function ActionRow({ action, onToggle, onDelete, onUpdate }) {
-  const [editing, setEditing] = useState(false)
-  const [text, setText] = useState(action.action_text)
-
-  return (
-    <div style={{display:'flex',alignItems:'flex-start',gap:10,padding:'8px 0',borderBottom:'1px solid var(--border)'}}>
-      <button onClick={()=>onToggle(action.id,action.is_done)} style={{background:'none',border:'none',cursor:'pointer',marginTop:1,flexShrink:0}}>
-        {action.is_done
-          ? <Check size={16} color="var(--green)"/>
-          : <div style={{width:16,height:16,borderRadius:'50%',border:'2px solid var(--border)'}}/>
-        }
-      </button>
-      <div style={{flex:1,minWidth:0}}>
-        {editing ? (
-          <div className="flex gap-2">
-            <input value={text} onChange={e=>setText(e.target.value)} style={{fontSize:13,padding:'3px 8px'}} autoFocus
-              onKeyDown={e=>{if(e.key==='Enter'){onUpdate(action.id,text);setEditing(false)}if(e.key==='Escape')setEditing(false)}}/>
-            <button className="btn btn-primary btn-icon btn-sm" onClick={()=>{onUpdate(action.id,text);setEditing(false)}}><Check size={12}/></button>
-            <button className="btn btn-ghost btn-icon btn-sm" onClick={()=>setEditing(false)}><X size={12}/></button>
-          </div>
-        ):(
-          <div>
-            <span style={{fontSize:13,textDecoration:action.is_done?'line-through':'none',color:action.is_done?'var(--text-muted)':'var(--text-primary)'}}>{action.action_text}</span>
-            {(action.owner||action.due_date)&&(
-              <div style={{fontSize:10,color:'var(--text-muted)',fontFamily:'var(--font-mono)',marginTop:2}}>
-                {action.owner&&<span>Owner: {action.owner}</span>}
-                {action.owner&&action.due_date&&<span> · </span>}
-                {action.due_date&&<span>Due: {new Date(action.due_date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-      <div className="flex gap-1" style={{flexShrink:0}}>
-        <button className="btn btn-ghost btn-icon btn-sm" onClick={()=>setEditing(true)}><Edit2 size={11}/></button>
-        <button className="btn btn-danger btn-icon btn-sm" onClick={()=>onDelete(action.id)}><Trash2 size={11}/></button>
-      </div>
-    </div>
-  )
-}
-
-// ── CLIENT CARD ──────────────────────────────────────────────
-function ClientCard({ client, latestEntry, history, onEdit, onDelete, isManagement }) {
-  const [expanded, setExpanded] = useState(false)
-  const score=parseFloat(avg(latestEntry))
-  const risk=latestEntry?.churn_risk||null
-  const prevEntry=history?.[1]
-  const prevScore=parseFloat(avg(prevEntry))
-  const trend=history?.length>1?score-prevScore:null
-  const radarData=SCORE_FIELDS.map(f=>({subject:f.short,value:parseFloat(latestEntry?.[f.key])||0,fullMark:5}))
-  const chartData=history?.slice().reverse().map(e=>({week:e.week_start?.slice(5),score:parseFloat(avg(e))}))
-
-  return (
-    <div className="card" style={{padding:0,overflow:'hidden'}}>
-      <div style={{padding:'14px 16px',borderLeft:`4px solid ${risk?RISK_COLORS[risk]:'var(--border)'}`,cursor:'pointer'}} onClick={()=>setExpanded(!expanded)}>
-        <div className="flex items-center justify-between" style={{flexWrap:'wrap',gap:8}}>
-          <div className="flex items-center gap-3" style={{flex:1}}>
-            <div>
-              <div style={{fontFamily:'var(--font-display)',fontWeight:600,fontSize:14}}>{client.name}</div>
-              {latestEntry?.notes&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:2,maxWidth:300,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{latestEntry.notes}</div>}
-            </div>
-          </div>
-          <div className="flex items-center gap-3" style={{flexShrink:0}}>
-            {risk&&<RiskBadge risk={risk}/>}
-            {latestEntry?(
-              <div style={{textAlign:'right'}}>
-                <div style={{fontFamily:'var(--font-display)',fontSize:22,fontWeight:700,letterSpacing:'-0.03em',color:score>=4?'var(--green)':score>=3?'var(--amber)':'var(--red)'}}>{score}</div>
-                {trend!==null&&<div style={{fontSize:10,color:trend>0?'var(--green)':trend<0?'var(--red)':'var(--text-muted)',display:'flex',alignItems:'center',justifyContent:'flex-end',gap:2}}>
-                  {trend>0?<TrendingUp size={10}/>:trend<0?<TrendingDown size={10}/>:<Minus size={10}/>}
-                  {trend>0?'+':''}{trend.toFixed(1)}
-                </div>}
-              </div>
-            ):<span style={{fontSize:11,color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>No data</span>}
-            <div className="flex gap-1">
-              <button className="btn btn-primary btn-sm" onClick={e=>{e.stopPropagation();onEdit()}} style={{fontSize:11}}>
-                {latestEntry?.week_start===weekStart()?'Update':'Log Week'}
-              </button>
-              {isManagement&&<button className="btn btn-danger btn-icon btn-sm" onClick={e=>{e.stopPropagation();onDelete()}}><Trash2 size={12}/></button>}
-            </div>
-            {expanded?<ChevronUp size={15} color="var(--text-muted)"/>:<ChevronDown size={15} color="var(--text-muted)"/>}
-          </div>
-        </div>
-        {latestEntry&&(
-          <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:8,marginTop:12}}>
-            {SCORE_FIELDS.map(f=>(
-              <div key={f.key}>
-                <div style={{fontSize:9,color:'var(--text-muted)',fontFamily:'var(--font-mono)',marginBottom:4,textTransform:'uppercase',letterSpacing:0.5}}>{f.short}</div>
-                <ScoreBar value={parseFloat(latestEntry[f.key])||0}/>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {expanded&&(
-        <>
-          <div style={{padding:'16px',borderTop:'1px solid var(--border)',background:'var(--bg)'}}>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 280px',gap:16}}>
-              <div>
-                <div className="card-label mb-2">Score Trend</div>
-                {chartData?.length>1?(
-                  <ResponsiveContainer width="100%" height={130}>
-                    <LineChart data={chartData}>
-                      <XAxis dataKey="week" tick={{fill:'#3d526e',fontSize:10}} axisLine={false} tickLine={false}/>
-                      <YAxis domain={[0,5]} tick={{fill:'#3d526e',fontSize:10}} axisLine={false} tickLine={false}/>
-                      <Tooltip contentStyle={{background:'#0e1420',border:'1px solid #1e2d47',borderRadius:8,fontSize:11}}/>
-                      <Line type="monotone" dataKey="score" stroke="#3b82f6" strokeWidth={2} dot={{fill:'#3b82f6',r:3}}/>
-                    </LineChart>
-                  </ResponsiveContainer>
-                ):<p className="text-muted text-sm">Log 2+ weeks to see trend.</p>}
-              </div>
-              <div>
-                <div className="card-label mb-2">This Week</div>
-                <ResponsiveContainer width="100%" height={130}>
-                  <RadarChart data={radarData}>
-                    <PolarGrid stroke="var(--border)"/>
-                    <PolarAngleAxis dataKey="subject" tick={{fill:'#7a8ba8',fontSize:10}}/>
-                    <Radar dataKey="value" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.15} strokeWidth={2}/>
-                  </RadarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          </div>
-          <ActionsPanel client={client} entry={latestEntry}/>
-        </>
-      )}
-    </div>
-  )
-}
-
-// ── ADD CLIENT ───────────────────────────────────────────────
-function AddClientModal({ onClose, onSave }) {
-  const [form, setForm] = useState(() => ({ name:'', ...packageFormValues() }))
+  const [form, setForm] = useState(() => ({
+    ...Object.fromEntries(CONFIG.fields.map(field => [field.key, existing?.[field.key] ?? ''])),
+    churn_risk: existing?.churn_risk ?? '', notes: existing?.notes ?? '',
+  }))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  async function handleSave() {
+  const dialogRef = useClientDialogFocus(onClose, saving)
+  async function save(event) {
+    event.preventDefault()
     if (saving) return
-    const validationError = !form.name.trim() ? 'Enter a client name.' : validateClientPackage(form, { requirePackage: true })
-    if (validationError) { setError(validationError); return }
+    if (!isHealthComplete('client', form)) { setError('Select every score from 1 to 5 and a churn risk before saving.'); return }
     setError('')
     setSaving(true)
     try {
-      const { data, error: saveError } = await supabase.from('clients').insert({
-        name: form.name.trim(),
-        ...packagePayload(form),
-        is_active:true,
-        is_archived:false,
-      }).select('id').single()
+      const row = await saveHealthEntry('client', { entityId: client.id, week, values: form, existing, userId: profile?.id })
+      onSave(row)
+      onClose()
+    } catch (saveError) { setError(saveError.message || 'The weekly health log could not be saved.') }
+    finally { setSaving(false) }
+  }
+  return <div className="modal-overlay" onClick={() => !saving && onClose()}><div ref={dialogRef} tabIndex={-1} className="modal" style={{ maxWidth: 580 }} role="dialog" aria-modal="true" aria-labelledby="client-health-log-title" onClick={event => event.stopPropagation()}>
+    <div className="client-health-heading"><h2 className="modal-title" id="client-health-log-title">{client.name} · {existing ? 'Edit weekly log' : 'Log client health'}</h2><button className="btn btn-ghost btn-icon" type="button" aria-label="Close client health log" disabled={saving} onClick={onClose}><X size={17} /></button></div>
+    <p className="client-health-note">{legacyWeek(week) ? 'Saved date' : 'Week starting'} {weekText(week)}. {existing ? 'Editing this exact record keeps its notes and linked actions in the same week.' : 'This is a new weekly log; previous scores are not carried forward.'}</p>
+    <form onSubmit={save}>
+      {CONFIG.fields.map((field, fieldIndex) => <fieldset className="client-health-score-input" key={field.key} disabled={saving}><legend>{field.label}</legend>{field.desc && <p className="client-health-note">{field.desc}</p>}<div className="client-health-choice-row">{[1, 2, 3, 4, 5].map(value => <button type="button" key={value} data-client-dialog-focus={fieldIndex === 0 && value === 1 ? '' : undefined} aria-label={`${field.label}: ${value} out of 5`} aria-pressed={Number(form[field.key]) === value} onClick={() => setForm(current => ({ ...current, [field.key]: value }))}>{value}</button>)}</div></fieldset>)}
+      <fieldset className="client-health-score-input" disabled={saving}><legend>Churn risk</legend><div className="client-health-choice-row">{CONFIG.risks.map(risk => <button type="button" key={risk} aria-pressed={form.churn_risk === risk} onClick={() => setForm(current => ({ ...current, churn_risk: risk }))}>{risk}</button>)}</div></fieldset>
+      <label className="client-health-field form-group">Notes / observations<textarea rows={4} value={form.notes} disabled={saving} onChange={event => setForm(current => ({ ...current, notes: event.target.value }))} placeholder="Client feedback, results, delivery issues, and follow-up context…" /></label>
+      <p className="client-health-note">{isHealthComplete('client', form) ? `Average score: ${scoreText(form)} / 5` : 'All five scores and a risk level are required.'} Save scores first, then add actions to this entry.</p>
+      {error && <p role="alert" className="client-health-error">{error}</p>}
+      <div className="flex gap-2"><button className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : existing ? 'Update this log' : 'Save weekly log'}</button><button className="btn btn-ghost" type="button" disabled={saving} onClick={onClose}>Cancel</button></div>
+    </form>
+  </div></div>
+}
+
+function ActionFields({ form, setForm, prefix }) {
+  return <>
+    <label className="client-health-field form-group">Action<input aria-label={`${prefix} action`} required value={form.action_text} onChange={event => setForm(current => ({ ...current, action_text: event.target.value }))} placeholder="What needs to happen?" /></label>
+    <div className="client-health-input-grid"><label className="client-health-field">Owner<input aria-label={`${prefix} action owner`} value={form.owner} onChange={event => setForm(current => ({ ...current, owner: event.target.value }))} placeholder="Who owns this?" /></label><label className="client-health-field">Due date<input aria-label={`${prefix} action due date`} type="date" value={form.due_date} onChange={event => setForm(current => ({ ...current, due_date: event.target.value }))} /></label></div>
+  </>
+}
+
+function actionValues(form) {
+  if (!form.action_text.trim()) throw new Error('Enter an action before saving.')
+  if (form.due_date && !parseReportingDate(form.due_date)) throw new Error('Choose a valid action due date.')
+  return { action_text: form.action_text.trim(), owner: form.owner.trim() || null, due_date: form.due_date || null }
+}
+
+function ActionsPanel({ client, entry }) {
+  const { profile } = useAuth()
+  const [actions, setActions] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [form, setForm] = useState({ action_text: '', owner: '', due_date: '' })
+  const [pending, setPending] = useState(null)
+  const load = useCallback(async () => {
+    const result = await fetchAllRows(() => supabase.from('client_actions').select('*').eq('health_entry_id', entry.id).order('created_at').order('id'))
+    if (result.error) setError(`Actions could not load: ${result.error.message}`)
+    else { setActions(result.data); setError('') }
+    setLoading(false)
+  }, [entry.id])
+  useEffect(() => {
+    let cancelled = false
+    fetchAllRows(() => supabase.from('client_actions').select('*').eq('health_entry_id', entry.id).order('created_at').order('id')).then(result => {
+      if (cancelled) return
+      if (result.error) setError(`Actions could not load: ${result.error.message}`)
+      else setActions(result.data)
+      setLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [entry.id])
+  async function addAction(event) {
+    event.preventDefault()
+    if (pending) return
+    setPending('new'); setError('')
+    try {
+      const values = actionValues(form)
+      const { data, error: saveError } = await supabase.from('client_actions').insert({ ...values, client_id: client.id, health_entry_id: entry.id, created_by: profile?.id }).select('*').single()
+      if (saveError) throw saveError
+      if (!data?.id) throw new Error('No action was saved. Check your permissions.')
+      setActions(current => [...current, data]); setForm({ action_text: '', owner: '', due_date: '' }); setAdding(false)
+    } catch (saveError) { setError(saveError.message) }
+    finally { setPending(null) }
+  }
+  async function updateAction(action, patch) {
+    if (pending) return false
+    setPending(action.id); setError('')
+    try {
+      let query = supabase.from('client_actions').update(patch).eq('id', action.id).eq('health_entry_id', entry.id)
+      if (action.updated_at) query = query.eq('updated_at', action.updated_at)
+      const { data, error: saveError } = await query.select('*').single()
+      if (saveError) throw saveError
+      if (!data?.id) throw new Error('No action was updated. Check your permissions.')
+      setActions(current => current.map(row => row.id === action.id ? data : row)); return true
+    } catch (saveError) { setError(saveError.message); return false }
+    finally { setPending(null) }
+  }
+  async function deleteAction(action) {
+    if (pending || !confirm(`Delete this action from the ${weekText(entry.week_start)} log? This cannot be undone.`)) return
+    setPending(action.id); setError('')
+    try {
+      const { data, error: saveError } = await supabase.from('client_actions').delete().eq('id', action.id).eq('health_entry_id', entry.id).select('id').single()
+      if (saveError) throw saveError
+      if (!data?.id) throw new Error('No action was deleted. Check your permissions.')
+      setActions(current => current.filter(row => row.id !== action.id))
+    } catch (saveError) { setError(saveError.message) }
+    finally { setPending(null) }
+  }
+  return <section className="client-health-actions" aria-label={`Actions for ${client.name}, ${weekText(entry.week_start)}`}>
+    <div className="client-health-heading"><div><h4>Actions to improve</h4><p className="client-health-note">Linked to this saved log: {weekText(entry.week_start)}</p></div><button className="btn btn-primary btn-sm" disabled={!!pending || loading} onClick={() => setAdding(current => !current)}><Plus size={12} /> Add action</button></div>
+    {error && <p role="alert" className="client-health-error">{error} <button className="btn btn-ghost btn-sm" onClick={load}>Retry loading</button></p>}
+    {adding && <form className="client-health-action-form" onSubmit={addAction}><ActionFields form={form} setForm={setForm} prefix="New" /><div className="flex gap-2"><button className="btn btn-primary btn-sm" disabled={!!pending}>{pending === 'new' ? 'Saving…' : 'Save action'}</button><button type="button" className="btn btn-ghost btn-sm" disabled={!!pending} onClick={() => setAdding(false)}>Cancel</button></div></form>}
+    {loading ? <p className="client-health-note">Loading actions…</p> : !error && actions.length === 0 && <p className="client-health-note">No actions saved for this log.</p>}
+    {actions.map(action => <ActionRow key={action.id} action={action} disabled={!!pending} onUpdate={updateAction} onDelete={deleteAction} />)}
+  </section>
+}
+
+function ActionRow({ action, disabled, onUpdate, onDelete }) {
+  const [editing, setEditing] = useState(false)
+  const [form, setForm] = useState({ action_text: action.action_text || '', owner: action.owner || '', due_date: action.due_date || '' })
+  const [error, setError] = useState('')
+  async function save(event) {
+    event.preventDefault(); setError('')
+    try { if (await onUpdate(action, actionValues(form))) setEditing(false) }
+    catch (saveError) { setError(saveError.message) }
+  }
+  return <div className="client-health-action-row">
+    <button className="btn btn-ghost btn-icon btn-sm" aria-label={action.is_done ? `Mark action incomplete: ${action.action_text}` : `Complete action: ${action.action_text}`} aria-pressed={!!action.is_done} disabled={disabled} onClick={() => onUpdate(action, { is_done: !action.is_done })}>{action.is_done ? <Check size={16} color="var(--green)" /> : <span className="client-health-open-action" />}</button>
+    <div style={{ flex: 1, minWidth: 0 }}>{editing ? <form onSubmit={save}><ActionFields form={form} setForm={setForm} prefix="Edit" />{error && <p className="client-health-error" role="alert">{error}</p>}<div className="flex gap-2"><button className="btn btn-primary btn-sm" disabled={disabled}>Save changes</button><button type="button" className="btn btn-ghost btn-sm" disabled={disabled} onClick={() => setEditing(false)}>Cancel</button></div></form> : <><p style={{ margin: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', textDecoration: action.is_done ? 'line-through' : 'none' }}>{action.action_text}</p><p className="client-health-note">{action.owner ? `Owner: ${action.owner}` : 'Owner not set'} · {action.due_date ? `Due: ${parseReportingDate(action.due_date)?.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) || action.due_date}` : 'No due date'} · {action.is_done ? 'Done' : 'Open'}</p></>}</div>
+    {!editing && <div className="flex gap-1"><button className="btn btn-ghost btn-icon btn-sm" aria-label="Edit action" disabled={disabled} onClick={() => { setForm({ action_text: action.action_text || '', owner: action.owner || '', due_date: action.due_date || '' }); setEditing(true) }}><Edit2 size={12} /></button><button className="btn btn-danger btn-icon btn-sm" aria-label="Delete action" disabled={disabled} onClick={() => onDelete(action)}><Trash2 size={12} /></button></div>}
+  </div>
+}
+
+function EntryDetails({ client, entry, showScores = true }) {
+  return <div className="client-health-detail">{showScores && <ScoreDetails entry={entry} />}<h4>Notes / observations</h4><p className="client-health-saved-note">{entry.notes || 'No notes saved.'}</p><ActionsPanel key={entry.id} client={client} entry={entry} /></div>
+}
+
+function AddClientModal({ onClose, onSave }) {
+  const [form, setForm] = useState(() => ({ name: '', ...packageFormValues() }))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const dialogRef = useClientDialogFocus(onClose, saving)
+  async function save(event) {
+    event.preventDefault()
+    if (saving) return
+    const validationError = !form.name.trim() ? 'Enter a client name.' : validateClientPackage(form, { requirePackage: true })
+    if (validationError) { setError(validationError); return }
+    setError(''); setSaving(true)
+    try {
+      const { data, error: saveError } = await supabase.from('clients').insert({ name: form.name.trim(), ...packagePayload(form), is_active: true, is_archived: false }).select('id').single()
       if (saveError) throw saveError
       if (!data?.id) throw new Error('The client could not be created. Please ask the CEO to check your client editing permissions.')
-      onSave()
-      onClose()
-    } catch (saveError) {
-      setError('Save failed: ' + saveError.message)
-    } finally {
-      setSaving(false)
-    }
+      await onSave(); onClose()
+    } catch (saveError) { setError(`Save failed: ${saveError.message}`) }
+    finally { setSaving(false) }
   }
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" style={{maxWidth:580}} onClick={e=>e.stopPropagation()}>
-        <h2 className="modal-title">Add Client</h2>
-        <div className="form-group"><label htmlFor="health-client-name">Client Name *</label>
-          <input id="health-client-name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="e.g. Abriga" autoFocus required/>
-        </div>
-        <ClientPackageFields value={form} onChange={setForm} requirePackage showConcepts/>
-        {error && <p role="alert" style={{color:'var(--red)',fontSize:12,marginTop:12}}>{error}</p>}
-        <div className="flex gap-2 mt-4">
-          <button className="btn btn-primary" onClick={handleSave} disabled={saving||!form.name.trim()}>{saving?'Adding...':'Add'}</button>
-          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-        </div>
-      </div>
-    </div>
-  )
+  return <div className="modal-overlay" onClick={() => !saving && onClose()}><div ref={dialogRef} tabIndex={-1} className="modal" style={{ maxWidth: 580 }} role="dialog" aria-modal="true" aria-labelledby="health-add-client-title" onClick={event => event.stopPropagation()}><h2 className="modal-title" id="health-add-client-title">Add Client</h2><form onSubmit={save}>
+    <div className="form-group"><label htmlFor="health-client-name">Client Name *</label><input id="health-client-name" data-client-dialog-focus="" value={form.name} onChange={event => setForm(current => ({ ...current, name: event.target.value }))} placeholder="e.g. Abriga" required /></div>
+    <ClientPackageFields value={form} onChange={setForm} requirePackage showConcepts />
+    {error && <p role="alert" className="client-health-error">{error}</p>}<div className="flex gap-2 mt-4"><button className="btn btn-primary" disabled={saving || !form.name.trim()}>{saving ? 'Adding…' : 'Add'}</button><button className="btn btn-ghost" type="button" disabled={saving} onClick={onClose}>Cancel</button></div>
+  </form></div></div>
 }
 
 export default function Clients() {
-  const { isManagement, isOps } = useAuth()
-  const [clients, setClients] = useState([])
-  const [entries, setEntries] = useState({})
+  const { profile, isManagement, isOps } = useAuth()
+  if (!isManagement && !isOps) return <div className="page-body"><p className="text-muted">Client Health is available to management and operations.</p></div>
+  return <ClientHealthPage key={profile?.id} />
+}
+
+function ClientHealthPage() {
+  const [params, setParams] = useSearchParams()
+  const [data, setData] = useState({ entities: [], entries: [] })
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [error, setError] = useState('')
   const [showAdd, setShowAdd] = useState(false)
-  const [editClient, setEditClient] = useState(null)
+  const [logging, setLogging] = useState(null)
+  const [expanded, setExpanded] = useState(null)
+  const [archiving, setArchiving] = useState(null)
+  const [search, setSearch] = useState('')
   const [riskFilter, setRiskFilter] = useState('all')
-  const [sortBy, setSortBy] = useState('risk')
-  const [showArchived, setShowArchived] = useState(false)
-
-  useEffect(()=>{load()},[])
-
-  async function load() {
-    setLoading(true)
-    const {data:clientData}=await supabase.from('clients').select('*').eq('is_active',true).order('name')
-    setClients(clientData||[]) // keep all; filter in render
-    if (clientData?.length) {
-      const {data:entryData}=await supabase.from('client_health_entries').select('*').in('client_id',clientData.map(c=>c.id)).order('week_start',{ascending:false})
-      const map={}; entryData?.forEach(e=>{if (!map[e.client_id])map[e.client_id]=[];map[e.client_id].push(e)})
-      setEntries(map)
-    }
-    setLoading(false)
+  const [completion, setCompletion] = useState('all')
+  const [sortBy, setSortBy] = useState('missing')
+  const [historyStatus, setHistoryStatus] = useState('all')
+  const [historyClient, setHistoryClient] = useState('all')
+  const [historyWeek, setHistoryWeek] = useState('all')
+  const tab = ['history', 'analytics'].includes(params.get('tab')) ? params.get('tab') : 'weekly'
+  const requestedWeek = params.get('week')
+  const week = parseReportingDate(requestedWeek) && requestedWeek <= healthCurrentWeek() ? requestedWeek : healthDueWeek()
+  const weeks = useMemo(() => [...new Set([week, ...healthWeekOptions(data.entries)])].sort().reverse(), [data.entries, week])
+  const entityMap = useMemo(() => new Map(data.entities.map(client => [client.id, client])), [data.entities])
+  const load = useCallback(async () => {
+    setRefreshing(true)
+    try { setData(await fetchHealthData('client')); setError('') }
+    catch (loadError) { setError(loadError.message || 'Client Health could not load.') }
+    finally { setLoading(false); setRefreshing(false) }
+  }, [])
+  useEffect(() => {
+    let cancelled = false
+    fetchHealthData('client').then(next => { if (!cancelled) { setData(next); setError('') } }).catch(loadError => { if (!cancelled) setError(loadError.message) }).finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [])
+  useEffect(() => { window.addEventListener(HEALTH_REVIEW_EVENT, load); return () => window.removeEventListener(HEALTH_REVIEW_EVENT, load) }, [load])
+  useEffect(() => { window.addEventListener('focus', load); return () => window.removeEventListener('focus', load) }, [load])
+  function changeTab(value) { const next = new URLSearchParams(params); if (value === 'weekly') next.delete('tab'); else next.set('tab', value); setParams(next) }
+  function changeWeek(value) { const next = new URLSearchParams(params); next.set('week', value); setParams(next) }
+  function entrySaved(row) { setData(current => ({ ...current, entries: [...current.entries.filter(entry => entry.id !== row.id), row].sort((a, b) => b.week_start.localeCompare(a.week_start)) })) }
+  async function archive(client) {
+    if (archiving || !confirm(`Archive ${client.name}? This removes the client from active lists while preserving saved history and actions.`)) return
+    setArchiving(client.id)
+    try {
+      const { data: saved, error: saveError } = await supabase.from('clients').update({ is_active: false }).eq('id', client.id).select('id,is_active').single()
+      if (saveError) throw saveError
+      if (!saved?.id) throw new Error('The archive did not apply. Check your permissions.')
+      setData(current => ({ ...current, entities: current.entities.map(row => row.id === client.id ? { ...row, ...saved } : row) })); setError('')
+      window.dispatchEvent(new Event(HEALTH_REVIEW_EVENT))
+    } catch (saveError) { setError(`Archive failed: ${saveError.message}`) }
+    finally { setArchiving(null) }
   }
+  const summary = healthWeekSummary('client', data.entities, data.entries, week)
+  const weeklyRows = healthEligibleEntities('client', data.entities, data.entries, week).map(client => ({ client, entry: data.entries.find(entry => entry.client_id === client.id && entry.week_start === week) }))
+    .filter(({ client, entry }) => (!search || client.name.toLowerCase().includes(search.toLowerCase())) && (riskFilter === 'all' || entry?.churn_risk === riskFilter)
+      && (completion === 'all' || (completion === 'complete' ? isHealthComplete('client', entry) : !isHealthComplete('client', entry))))
+    .sort((a, b) => (sortBy === 'missing' ? Number(isHealthComplete('client', a.entry)) - Number(isHealthComplete('client', b.entry)) : sortBy === 'risk' ? (RISK_ORDER[a.entry?.churn_risk] ?? 4) - (RISK_ORDER[b.entry?.churn_risk] ?? 4) : sortBy === 'score' ? (healthScore('client', a.entry) ?? -1) - (healthScore('client', b.entry) ?? -1) : 0) || a.client.name.localeCompare(b.client.name))
+  const historyEntities = data.entities.filter(client => historyStatus === 'all' || (historyStatus === 'active') === isHealthEntityActive('client', client))
+  const historyIds = new Set(historyEntities.map(client => client.id))
+  const historyRows = data.entries.filter(entry => historyIds.has(entry.client_id) && (historyClient === 'all' || entry.client_id === historyClient) && (historyWeek === 'all' || entry.week_start === historyWeek) && (!search || entityMap.get(entry.client_id)?.name.toLowerCase().includes(search.toLowerCase())))
+    .sort((a, b) => b.week_start.localeCompare(a.week_start) || (entityMap.get(a.client_id)?.name || '').localeCompare(entityMap.get(b.client_id)?.name || ''))
+  const names = new Map()
+  data.entities.forEach(client => names.set(client.name.toLowerCase(), (names.get(client.name.toLowerCase()) || 0) + 1))
 
-  async function handleDelete(id) {
-    if (!confirm('Archive this client?')) return
-    await supabase.from('clients').update({is_active:false}).eq('id',id)
-    setClients(prev=>prev.filter(c=>c.id!==id))
-  }
-
-  const activeClients = clients.filter(c=>!c.is_archived)
-  const archivedClients = clients.filter(c=>c.is_archived)
-  const displayClients = showArchived ? archivedClients : activeClients
-
-  if (!isManagement && !isOps) return <div className="page-body" style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'60vh'}}><p className="text-muted">Management access only.</p></div>
-
-  const RISK_ORDER={Leaving:0,High:1,Medium:2,Low:3}
-  let filtered=clients.filter(c=>{
-    const e=entries[c.id]?.[0]
-    if (riskFilter==='all') return true
-    return (e?.churn_risk||'Low')===riskFilter
-  }).sort((a,b)=>{
-    const ea=entries[a.id]?.[0],eb=entries[b.id]?.[0]
-    if (sortBy==='risk') return (RISK_ORDER[ea?.churn_risk]??3)-(RISK_ORDER[eb?.churn_risk]??3)
-    if (sortBy==='score') return parseFloat(avg(eb))-parseFloat(avg(ea))
-    return a.name.localeCompare(b.name)
-  })
-
-  const withEntries=displayClients.filter(c=>entries[c.id]?.length>0)
-  const highRisk=withEntries.filter(c=>['High','Leaving'].includes(entries[c.id]?.[0]?.churn_risk)).length
-  const avgScore=withEntries.length?(withEntries.reduce((s,c)=>s+parseFloat(avg(entries[c.id]?.[0])),0)/withEntries.length).toFixed(1):'—'
-  const leaving=clients.filter(c=>entries[c.id]?.[0]?.churn_risk==='Leaving').length
-
-  return (
-    <>
-      <div className="page-header">
-        <div className="flex items-center justify-between" style={{flexWrap:'wrap',gap:10}}>
-          <div><h1 className="page-title">Client Health</h1><p className="page-subtitle">Weekly churn risk assessment, scoring, and action tracking</p></div>
-          <button onClick={()=>setShowArchived(!showArchived)}
-            className="btn btn-ghost btn-sm"
-            style={{color:showArchived?'var(--amber)':'var(--text-secondary)',borderColor:showArchived?'var(--amber)':'var(--border)'}}>
-            {showArchived?'← Active Clients':'Archived Clients'}
-          </button>
-          <button className="btn btn-primary" onClick={()=>setShowAdd(true)}><Plus size={15}/> Add Client</button>
-        </div>
-      </div>
-      <div className="page-body">
-        <div className="stat-row">
-          <div className="stat-box"><div className="stat-box-label">Total Clients</div><div className="stat-box-value">{clients.length}</div></div>
-          <div className="stat-box"><div className="stat-box-label">Avg Score</div><div className="stat-box-value text-accent">{avgScore}</div></div>
-          <div className="stat-box"><div className="stat-box-label">High Risk</div><div className="stat-box-value text-red">{highRisk}</div></div>
-          <div className="stat-box"><div className="stat-box-label">Leaving</div><div className="stat-box-value" style={{color:'#7c3aed'}}>{leaving}</div></div>
-        </div>
-
-        {withEntries.length>0&&(
-          <div className="card mb-4">
-            <div className="card-label mb-2">Risk Distribution</div>
-            <div style={{display:'flex',gap:0,borderRadius:6,overflow:'hidden',height:10}}>
-              {['Low','Medium','High','Leaving'].map(r=>{
-                const count=withEntries.filter(c=>(entries[c.id]?.[0]?.churn_risk||'Low')===r).length
-                const pct=(count/withEntries.length)*100
-                return pct>0?<div key={r} style={{width:`${pct}%`,background:RISK_COLORS[r],transition:'width 0.4s'}} title={`${r}: ${count}`}/>:null
-              })}
-            </div>
-            <div className="flex gap-4 mt-3">
-              {['Low','Medium','High','Leaving'].map(r=>{
-                const count=withEntries.filter(c=>(entries[c.id]?.[0]?.churn_risk||'Low')===r).length
-                return <div key={r} className="flex items-center gap-2"><div style={{width:8,height:8,borderRadius:'50%',background:RISK_COLORS[r]}}/><span style={{fontSize:11,color:'var(--text-secondary)',fontFamily:'var(--font-mono)'}}>{r}: <strong>{count}</strong></span></div>
-              })}
-            </div>
-          </div>
-        )}
-
-        <div className="flex items-center gap-3 mb-4" style={{flexWrap:'wrap'}}>
-          <div className="tabs" style={{border:'none',marginBottom:0}}>
-            {['all','Low','Medium','High','Leaving'].map(r=>(
-              <button key={r} className={`tab ${riskFilter===r?'active':''}`} onClick={()=>setRiskFilter(r)}
-                style={{color:riskFilter===r&&r!=='all'?RISK_COLORS[r]:undefined}}>{r==='all'?'All':r}</button>
-            ))}
-          </div>
-          <select value={sortBy} onChange={e=>setSortBy(e.target.value)} style={{width:'auto',marginLeft:'auto',fontSize:12}}>
-            <option value="risk">Sort by Risk</option>
-            <option value="score">Sort by Score</option>
-            <option value="name">Sort by Name</option>
-          </select>
-        </div>
-
-        {loading?<div className="loading-screen" style={{minHeight:200}}><div className="spinner"/></div>:(
-          <div style={{display:'flex',flexDirection:'column',gap:8}}>
-            {filtered.map(client=>(
-              <ClientCard key={client.id} client={client} latestEntry={entries[client.id]?.[0]} history={entries[client.id]}
-                onEdit={()=>setEditClient(client)} onDelete={()=>handleDelete(client.id)} isManagement={isManagement||isOps}/>
-            ))}
-          </div>
-        )}
-      </div>
-      {showAdd&&<AddClientModal onClose={()=>setShowAdd(false)} onSave={load}/>}
-      {editClient&&<EntryModal client={editClient} existing={entries[editClient.id]?.[0]?.week_start===weekStart()?entries[editClient.id][0]:null} onClose={()=>setEditClient(null)} onSave={load}/>}
-    </>
-  )
+  return <>
+    <div className="page-header"><div className="client-health-heading"><div><h1 className="page-title">Client Health</h1><p className="page-subtitle">Weekly client scores, churn risk, and follow-up actions</p></div><div className="client-health-buttons"><button className="btn btn-ghost" disabled={loading || refreshing} onClick={load}>{refreshing ? 'Refreshing…' : 'Refresh'}</button><button className="btn btn-primary" onClick={() => setShowAdd(true)}><Plus size={15} /> Add Client</button></div></div></div>
+    <div className="page-body">
+      <div className="client-health-tabs" role="tablist" aria-label="Client Health views">{[['weekly', 'Weekly logs'], ['history', 'History'], ['analytics', 'Analytics']].map(([value, label]) => <button role="tab" aria-selected={tab === value} key={value} onClick={() => changeTab(value)}>{label}</button>)}</div>
+      {error && <div className="client-health-error" role="alert">{error} <button className="btn btn-ghost btn-sm" onClick={load}>Retry</button></div>}
+      {loading ? <div className="client-health-empty">Loading Client Health…</div> : error && !data.entities.length ? null : tab === 'analytics' ? <HealthAnalytics kind="client" entities={data.entities} entries={data.entries} /> : tab === 'weekly' ? <>
+        <div className="client-health-controls"><label className="client-health-field">Week starting<select value={week} onChange={event => changeWeek(event.target.value)}>{weeks.map(value => <option key={value} value={value}>{weekText(value)}{value === healthDueWeek() ? ' · due now' : value === healthCurrentWeek() ? ' · in progress' : ''}</option>)}</select></label>{week !== healthDueWeek() && <button className="btn btn-ghost btn-sm" onClick={() => changeWeek(healthDueWeek())}>Go to due week</button>}</div>
+        <p className="client-health-note">{legacyWeek(week) ? 'Legacy records retain their original saved date. Edit existing logs here; new logs use Monday week-start dates.' : week === healthCurrentWeek() ? 'This week is still in progress. The standard Monday review covers the prior completed week.' : 'Complete a fresh log for each client every Monday for the prior completed week. Earlier logs are not treated as current submissions.'}</p>
+        <div className="stat-row"><div className="stat-box"><div className="stat-box-label">Clients to review</div><div className="stat-box-value">{summary.eligible}</div></div><div className="stat-box"><div className="stat-box-label">Complete logs</div><div className="stat-box-value text-green">{summary.complete}</div></div><div className="stat-box"><div className="stat-box-label">Missing / incomplete</div><div className="stat-box-value text-amber">{summary.missing + summary.partial}</div></div><div className="stat-box"><div className="stat-box-label">Average score</div><div className="stat-box-value">{summary.average == null ? '—' : summary.average.toFixed(1)}</div></div><div className="stat-box"><div className="stat-box-label">High risk / leaving</div><div className="stat-box-value text-red">{summary.highRisk}</div></div></div>
+        <p className="client-health-note">Coverage uses eligible roster clients for this week and any client with an existing log on the exact date. Average and risk counts use complete logs only. Filters below affect the list, not these totals.</p>
+        <div className="client-health-controls"><label className="client-health-field">Find a client<input value={search} onChange={event => setSearch(event.target.value)} placeholder="Client name…" /></label><label className="client-health-field">Risk<select value={riskFilter} onChange={event => setRiskFilter(event.target.value)}><option value="all">All risks</option>{CONFIG.risks.map(risk => <option key={risk}>{risk}</option>)}</select></label><label className="client-health-field">Completion<select value={completion} onChange={event => setCompletion(event.target.value)}><option value="all">All clients</option><option value="missing">Missing / incomplete</option><option value="complete">Complete logs</option></select></label><label className="client-health-field">Sort<select value={sortBy} onChange={event => setSortBy(event.target.value)}><option value="missing">Needs logging first</option><option value="risk">Highest risk first</option><option value="score">Lowest score first</option><option value="name">Client name</option></select></label></div>
+        <div className="client-health-list">{weeklyRows.map(({ client, entry }) => <article className="card client-health-card" key={client.id}><div className="client-health-card-top"><div><h3>{client.name}</h3><p className="client-health-note">{!isHealthEntityActive('client', client) ? 'Paused / past client · ' : ''}{!entry ? 'Not logged for this week' : isHealthComplete('client', entry) ? `Complete log · ${weekText(entry.week_start)}` : 'Incomplete log · select every score and risk'}</p></div><div className="client-health-buttons">{entry && <><RiskBadge risk={entry.churn_risk} /><strong className="client-health-average">{scoreText(entry)}<small> / 5</small></strong></>}{(entry || !legacyWeek(week)) && <button className="btn btn-primary btn-sm" onClick={() => setLogging({ client, existing: entry, week })}>{entry ? 'Edit log' : 'Log week'}</button>}{entry && <button className="btn btn-ghost btn-sm" aria-expanded={expanded === entry.id} onClick={() => setExpanded(expanded === entry.id ? null : entry.id)}>Notes & actions</button>}{isHealthEntityActive('client', client) && <button className="btn btn-ghost btn-icon btn-sm" aria-label={`Archive ${client.name}`} disabled={!!archiving} onClick={() => archive(client)}><Archive size={14} /></button>}</div></div>{entry && <ScoreDetails entry={entry} />}{entry && expanded === entry.id && <EntryDetails client={client} entry={entry} showScores={false} />}</article>)}{!weeklyRows.length && <p className="client-health-empty">No clients match this week and these filters.</p>}</div>
+      </> : <>
+        <div className="client-health-controls"><label className="client-health-field">Client status<select value={historyStatus} onChange={event => { setHistoryStatus(event.target.value); setHistoryClient('all') }}><option value="all">Current + past clients</option><option value="active">Active clients</option><option value="past">Paused / past clients</option></select></label><label className="client-health-field">Client<select value={historyClient} onChange={event => setHistoryClient(event.target.value)}><option value="all">All clients in view</option>{historyEntities.map(client => <option key={client.id} value={client.id}>{client.name}{names.get(client.name.toLowerCase()) > 1 ? ` · ${isHealthEntityActive('client', client) ? 'Active' : 'Paused / past'} · ${client.id.slice(-6)}` : ''}</option>)}</select></label><label className="client-health-field">Saved week<select value={historyWeek} onChange={event => setHistoryWeek(event.target.value)}><option value="all">All saved weeks</option>{[...new Set(data.entries.map(entry => entry.week_start))].sort().reverse().map(value => <option key={value} value={value}>{weekText(value)}</option>)}</select></label><label className="client-health-field">Find a client<input value={search} onChange={event => setSearch(event.target.value)} placeholder="Client name…" /></label></div>
+        <p className="client-health-note">{historyRows.length} saved logs. Historical dates, notes, and linked actions remain attached to their original records; legacy non-Monday dates are not moved.</p>
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}><div className="table-wrap"><table className="client-health-history"><thead><tr><th>Client</th><th>Saved week start</th><th>Score</th><th>Churn risk</th><th>Completion</th><th>Notes / actions</th></tr></thead><tbody>{historyRows.map(entry => {
+          const client = entityMap.get(entry.client_id)
+          return <Fragment key={entry.id}><tr><td>{client.name}<div className="client-health-note">{isHealthEntityActive('client', client) ? 'Active' : 'Paused / past'}</div></td><td>{weekText(entry.week_start)}</td><td>{scoreText(entry)} / 5</td><td><RiskBadge risk={entry.churn_risk} /></td><td>{isHealthComplete('client', entry) ? 'Complete' : 'Incomplete log'}</td><td><div className="client-health-buttons"><button className="btn btn-ghost btn-sm" aria-expanded={expanded === entry.id} onClick={() => setExpanded(expanded === entry.id ? null : entry.id)}>Inspect log</button><button className="btn btn-ghost btn-sm" onClick={() => setLogging({ client, existing: entry, week: entry.week_start })}>Edit exact log</button></div></td></tr>{expanded === entry.id && <tr><td colSpan={6} style={{ padding: 0 }}><EntryDetails client={client} entry={entry} /></td></tr>}</Fragment>
+        })}{!historyRows.length && <tr><td colSpan={6} className="client-health-empty">No saved logs match these filters.</td></tr>}</tbody></table></div></div>
+      </>}
+    </div>
+    {showAdd && <AddClientModal onClose={() => setShowAdd(false)} onSave={load} />}
+    {logging && <EntryModal key={`${logging.client.id}:${logging.week}:${logging.existing?.id || 'new'}`} {...logging} onClose={() => setLogging(null)} onSave={entrySaved} />}
+  </>
 }

@@ -9,6 +9,7 @@ import { formatOkrLabel } from '../lib/dashboardOkrs'
 import DashboardOKRs from '../components/DashboardOKRs'
 import PlanDashboard from '../components/PlanDashboard'
 import SpendDashboard from '../components/SpendDashboard'
+import WeeklyHealthPrompt from '../components/WeeklyHealthPrompt'
 import './Dashboard.css'
 
 function getGreeting() {
@@ -88,6 +89,7 @@ export default function Dashboard() {
         {!surveyState.loading && !surveyState.error && <MonthlySurveyBanner submission={surveyState.submission} surveyMonth={surveyMonth}/>}
         {surveyState.error && <div className="home-survey-unavailable">Survey status unavailable. <Link to="/monthly-survey">Open Monthly Survey</Link></div>}
         <QuickLinks/>
+        <WeeklyHealthPrompt/>
         <PlanDashboard/>
         <SpendDashboard/>
         <DashboardOKRs/>

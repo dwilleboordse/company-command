@@ -1,0 +1,41 @@
+.client-health-heading, .client-health-card-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
+.client-health-heading h2, .client-health-heading h4, .client-health-card h3 { margin: 0; }
+.client-health-note { font-size: 12px; line-height: 1.5; color: var(--text-muted); margin: 6px 0 12px; }
+.client-health-error { padding: 12px; background: var(--red-dim); color: var(--red); border-radius: var(--radius); margin: 12px 0; font-size: 13px; }
+.client-health-tabs { display: flex; gap: 6px; flex-wrap: wrap; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+.client-health-tabs button { border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 13px; padding: 12px 16px; }
+.client-health-tabs button[aria-selected=true] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 700; }
+.client-health-controls, .client-health-buttons { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.client-health-controls { align-items: flex-end; margin-bottom: 16px; }
+.client-health-field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; letter-spacing: 0; text-transform: none; font-weight: 500; color: var(--text-secondary); }
+.client-health-controls .client-health-field { min-width: 160px; max-width: 350px; }
+.client-health-input-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-bottom: 14px; }
+.client-health-list { display: flex; flex-direction: column; gap: 12px; }
+.client-health-card { padding: 18px; overflow: hidden; }
+.client-health-card h3 { font-size: 15px; }
+.client-health-card-top .client-health-note { margin-bottom: 0; }
+.client-health-average { font-size: 24px; white-space: nowrap; }
+.client-health-average small, .client-health-scores small { font-size: 11px; font-weight: 400; color: var(--text-muted); }
+.client-health-badge { font-size: 11px; font-weight: 600; padding: 4px 9px; border-radius: 20px; white-space: nowrap; }
+.client-health-scores { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 12px; margin: 16px 0 0; }
+.client-health-scores > div { display: flex; flex-direction: column; gap: 5px; padding: 8px; background: var(--bg); border-radius: var(--radius); }
+.client-health-scores span { color: var(--text-muted); font-size: 10px; }
+.client-health-scores strong { font-size: 16px; }
+.client-health-detail { padding: 16px; background: var(--bg); border-top: 1px solid var(--border); margin-top: 14px; }
+.client-health-detail h4 { margin: 14px 0 8px; font-size: 13px; }
+.client-health-saved-note { font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; margin: 0 0 20px; }
+.client-health-actions { padding-top: 14px; border-top: 1px solid var(--border); }
+.client-health-actions h4 { margin: 0; }
+.client-health-action-form { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; background: var(--bg-card); margin: 12px 0; }
+.client-health-action-row { display: flex; align-items: flex-start; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.client-health-open-action { display: block; width: 15px; height: 15px; border: 2px solid var(--border); border-radius: 50%; }
+.client-health-score-input { border: 0; padding: 0; margin: 16px 0; }
+.client-health-score-input legend { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.client-health-choice-row { display: flex; gap: 8px; }
+.client-health-choice-row button { flex: 1; padding: 10px 4px; background: var(--bg-input); color: var(--text-secondary); border: 2px solid var(--border); border-radius: var(--radius); font-weight: 600; cursor: pointer; }
+.client-health-choice-row button[aria-pressed=true] { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+.client-health-empty { text-align: center; padding: 36px 16px; color: var(--text-muted); font-size: 13px; }
+.client-health-history { min-width: 780px; }
+.client-health-history td { vertical-align: middle; }
+.client-health-history .client-health-note { margin-bottom: 0; }
+@media(max-width: 620px) { .client-health-controls .client-health-field { min-width: 0; max-width: none; flex: 1 1 160px; } .client-health-scores { grid-template-columns: repeat(3,minmax(0,1fr)); } .client-health-buttons { gap: 7px; } .client-health-card { padding: 14px; } .client-health-input-grid { grid-template-columns: 1fr; } }

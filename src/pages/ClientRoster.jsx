@@ -169,14 +169,8 @@ function ClientModal({ client, allMembers, onClose, onSave }) {
           .insert({...payload, is_active:true, is_archived:false}).select().single()
         if (saveError) throw saveError
         if (!newClient?.id) throw new Error('The client could not be created. Please ask the CEO to check your client editing permissions.')
-        const weekStart = new Date()
-        weekStart.setDate(weekStart.getDate()-weekStart.getDay()+1)
-        const ws = weekStart.toISOString().split('T')[0]
-        await supabase.from('client_health_entries').upsert({
-          client_id:newClient.id, week_start:ws,
-          performance_health:0, creative_strategy:0, execution_delivery:0,
-          strategic_alignment:0, communication:0
-        },{onConflict:'client_id,week_start'})
+        // Client Health derives missing weekly reviews from the roster. Creating
+        // a client must not create an unreviewed zero-score health observation.
       }
       onSave()
       onClose()
