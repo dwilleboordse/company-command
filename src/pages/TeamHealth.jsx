@@ -200,7 +200,8 @@ export default function TeamHealth() {
     reviews.filter(entry => entry.week_start === selectedWeek).forEach(entry => { if (!map.has(entry[CONFIG.idKey])) map.set(entry[CONFIG.idKey], entry) })
     return map
   }, [reviews, selectedWeek])
-  const summary = useMemo(() => healthWeekSummary('team', data.entities, reviews, selectedWeek), [data.entities, reviews, selectedWeek])
+  const activeMembers = useMemo(() => data.entities.filter(member => isHealthEntityActive('team', member)), [data.entities])
+  const summary = useMemo(() => healthWeekSummary('team', activeMembers, reviews, selectedWeek), [activeMembers, reviews, selectedWeek])
   const weeks = useMemo(() => [...new Set([...healthWeekOptions(reviews), selectedWeek, calendarWeek])].filter(isDateKey).sort((a, b) => b.localeCompare(a)), [reviews, selectedWeek, calendarWeek])
   const allMembers = useMemo(() => {
     const map = new Map(entitiesById)
@@ -210,7 +211,7 @@ export default function TeamHealth() {
   const departments = [...new Set(allMembers.map(member => member.department).filter(Boolean))].sort()
   const matchesMember = member => (memberFilter === 'all' || member.id === memberFilter) && (deptFilter === 'all' || member.department === deptFilter)
   const matchesReview = entry => (completionFilter === 'all' || completionOf(entry) === completionFilter) && (riskFilter === 'all' || entry?.[CONFIG.riskKey] === riskFilter)
-  const weeklyMembers = healthEligibleEntities('team', data.entities, reviews, selectedWeek).filter(member => matchesMember(member) && matchesReview(selectedByMember.get(member.id)))
+  const weeklyMembers = healthEligibleEntities('team', activeMembers, reviews, selectedWeek).filter(member => matchesMember(member) && matchesReview(selectedByMember.get(member.id)))
     .sort((a, b) => (RISK_ORDER[selectedByMember.get(a.id)?.[CONFIG.riskKey]] ?? 4) - (RISK_ORDER[selectedByMember.get(b.id)?.[CONFIG.riskKey]] ?? 4) || (a.full_name || '').localeCompare(b.full_name || ''))
   const visibleHistory = reviews.filter(entry => (historyPeriod === 'all' || entry.week_start === historyPeriod) && matchesMember(entitiesById.get(entry[CONFIG.idKey]) || unknownMember(entry[CONFIG.idKey])) && matchesReview(entry))
 
@@ -240,7 +241,7 @@ export default function TeamHealth() {
           <p className="team-health-muted">Reviews are due on Monday for the previous completed week, using Dubai time. You are viewing <strong>{weekLabel(selectedWeek)}</strong>.{selectedWeek === healthCurrentWeek() ? ' This week is still in progress.' : ''}</p>
           {!isMonday(selectedWeek) && <div className="team-health-period-note">This is a legacy date. Existing reviews can be corrected without moving them; new weekly reviews must start on a Monday.</div>}
           <div className="stat-row team-health-stat-row"><div className="stat-box"><div className="stat-box-label">Weekly coverage</div><div className="stat-box-value">{summary.complete} / {summary.eligible}</div></div><div className="stat-box"><div className="stat-box-label">Missing reviews</div><div className="stat-box-value">{summary.missing}</div></div><div className="stat-box"><div className="stat-box-label">Incomplete records</div><div className="stat-box-value">{summary.partial}</div></div><div className="stat-box"><div className="stat-box-label">Average score</div><div className="stat-box-value">{summary.average == null ? '—' : summary.average.toFixed(1)}</div></div><div className="stat-box"><div className="stat-box-label">High / critical risk</div><div className="stat-box-value text-red">{summary.highRisk}</div></div></div>
-          <p className="team-health-muted">Coverage: current roster eligible by week end, plus saved historical reviews. Past membership is not fully reconstructed. Only records dated exactly for this week count; missing or incomplete scores are not treated as healthy.</p>
+          <p className="team-health-muted">Current active roster eligible by week end. Past members remain in History; historical membership is not reconstructed. Only records dated exactly for this week count; missing or incomplete scores are not treated as healthy.</p>
         </> : <div className="team-health-history-heading"><div><h2>Saved team reviews</h2><p>Every entry retains its original date, scores, notes and actions. Editing a row only updates that saved record.</p></div><label htmlFor="team-health-history-week">Date<select id="team-health-history-week" value={historyPeriod} onChange={event => setHistoryPeriod(event.target.value)}><option value="all">All saved weeks</option>{[...new Set(reviews.map(entry => entry.week_start))].map(week => <option value={week} key={week}>{weekLabel(week)}</option>)}</select></label></div>}
         <div className="team-health-filters">
           <label htmlFor="team-health-member">Team member<select id="team-health-member" value={memberFilter} onChange={event => setMemberFilter(event.target.value)}><option value="all">All team members</option>{allMembers.filter(member => isHealthEntityActive('team', member) || memberHistory.has(member.id)).map(member => <option value={member.id} key={member.id}>{member.full_name}{!isHealthEntityActive('team', member) ? ' · historical' : ''}</option>)}</select></label>

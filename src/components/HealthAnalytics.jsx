@@ -23,6 +23,8 @@ export default function HealthAnalytics({ kind, entities, entries }) {
   const [department, setDepartment] = useState('all')
   const recordedIds = new Set(entries.map(row => row[config.idKey]))
   const population = entities.filter(entity => isHealthEntityActive(kind, entity) || recordedIds.has(entity.id))
+  const nameCounts = new Map()
+  population.forEach(entity => nameCounts.set(label(entity).toLowerCase(), (nameCounts.get(label(entity).toLowerCase()) || 0) + 1))
   const scopedEntities = population.filter(entity => (scope === 'all' || isHealthEntityActive(kind, entity) === (scope === 'active'))
     && (department === 'all' || entity.department === department))
   const selectedEntities = scopedEntities.filter(entity => entityId === 'all' || entity.id === entityId)
@@ -49,7 +51,7 @@ export default function HealthAnalytics({ kind, entities, entries }) {
       <label>Period<select value={period} onChange={event => setPeriod(event.target.value)}><option value="4">Last 4 weeks</option><option value="12">Last 12 weeks</option><option value="26">Last 26 weeks</option><option value="52">Last 52 weeks</option><option value="all">All history</option></select></label>
       <label>Roster<select value={scope} onChange={event => { setScope(event.target.value); setEntityId('all') }}><option value="all">Current and past</option><option value="active">Current only</option><option value="past">Past only</option></select></label>
       {kind === 'team' && <label>Department<select value={department} onChange={event => { setDepartment(event.target.value); setEntityId('all') }}><option value="all">All departments</option>{departments.map(value => <option key={value} value={value}>{value.replaceAll('_', ' ')}</option>)}</select></label>}
-      <label>{config.entityLabel}<select value={entityId} onChange={event => setEntityId(event.target.value)}><option value="all">All {kind === 'team' ? 'team members' : 'clients'}</option>{scopedEntities.map(entity => <option key={entity.id} value={entity.id}>{label(entity)}</option>)}</select></label>
+      <label>{config.entityLabel}<select value={entityId} onChange={event => setEntityId(event.target.value)}><option value="all">All {kind === 'team' ? 'team members' : 'clients'}</option>{scopedEntities.map(entity => <option key={entity.id} value={entity.id}>{label(entity)}{nameCounts.get(label(entity).toLowerCase()) > 1 ? ` · ${isHealthEntityActive(kind, entity) ? 'Current' : 'Past'} · ${entity.id.slice(-6)}` : ''}</option>)}</select></label>
     </div>
     <p className="health-analytics-note">{displayDate(start)} – {displayDate(end)} · Current week may be incomplete. Scores are on a 1–5 scale; only fully scored logs with a risk level contribute to averages.</p>
     <div className="health-analytics-kpis">
