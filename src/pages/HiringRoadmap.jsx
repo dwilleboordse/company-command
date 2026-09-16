@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowRight, BriefcaseBusiness, CalendarDays, CheckCircle
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { loadDesignCsData } from '../lib/designCsData'
-import { buildHiringSignals, buildWorkloads, formatMonth, PLANNING_ROLES, projectGrowthScenario } from '../lib/workforcePlanning'
+import { buildHiringSignals, buildRosterAllocations, buildWorkloads, formatMonth, PLANNING_ROLES, projectGrowthScenario } from '../lib/workforcePlanning'
 import './WorkforcePlanning.css'
 
 const STATUS_LABELS = {
@@ -29,6 +29,7 @@ function urgencyLabel(signal) {
 function roleUnitLabel(signal) {
   if (signal.key === 'editor') return 'video concepts'
   if (signal.key === 'designer') return 'static concepts'
+  if (signal.key === 'ugc_manager') return 'client equivalents'
   return signal.unit
 }
 
@@ -50,7 +51,7 @@ function SignalCard({ signal, onPlan }) {
       <div className="capacity-track"><div className={`capacity-fill ${danger ? 'overloaded' : signal.utilization >= 80 ? 'near_capacity' : 'healthy'}`} style={{ width: `${Math.min(signal.utilization, 100)}%` }}/></div>
       <div className="signal-stat-row">
         <span><strong>{signal.headcount}</strong> active</span>
-        <span><strong>{signal.used}</strong> / {signal.capacity} {roleUnitLabel(signal)}</span>
+        <span><strong>{Number(signal.used).toLocaleString('en-US', { maximumFractionDigits: 1 })}</strong> / {signal.capacity} {roleUnitLabel(signal)}</span>
         <span><strong>{signal.overloaded.length}</strong> overloaded</span>
       </div>
       <p>{signal.action}{signal.requiredPeople > 0 ? ` · model suggests ${signal.requiredPeople} additional ${signal.requiredPeople === 1 ? 'person' : 'people'}.` : '.'}</p>
@@ -221,7 +222,10 @@ export default function HiringRoadmap() {
   useEffect(() => { load(false) }, [])
 
   const monthRecord = data?.months.find(month => month.month_start === selectedMonth)
-  const monthAllocations = useMemo(() => (data?.allocations || []).filter(item => item.month_start === selectedMonth), [data?.allocations, selectedMonth])
+  const latestMonth = data?.months.at(-1)?.month_start || ''
+  const monthAllocations = useMemo(() => selectedMonth && selectedMonth === latestMonth
+    ? buildRosterAllocations({ clients: data?.clients || [], people: data?.people || [], monthStart: selectedMonth })
+    : (data?.allocations || []).filter(item => item.month_start === selectedMonth), [data?.allocations, data?.clients, data?.people, latestMonth, selectedMonth])
   const workloadSet = useMemo(() => buildWorkloads({ allocations: monthAllocations, people: data?.people || [], settings: data?.settings, workingDays: monthRecord?.working_days || 22 }), [monthAllocations, data?.people, data?.settings, monthRecord?.working_days])
   const signals = useMemo(() => buildHiringSignals({
     workloadsByRole: {

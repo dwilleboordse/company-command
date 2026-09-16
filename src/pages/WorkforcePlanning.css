@@ -226,6 +226,15 @@
 .planning-checks > div { display: flex; flex-wrap: wrap; gap: 7px; }
 .planning-checks label { display: flex; align-items: center; gap: 5px; padding: 5px 8px; border: 1px solid var(--border-light); border-radius: 999px; background: var(--bg); cursor: pointer; font-size: 10px; }
 .planning-checks input { width: 12px; height: 12px; }
+.planning-checks label:has(input:checked) { border-color: var(--accent); background: var(--accent-dim); }
+.allocation-share-summary { margin: 0 0 9px; color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
+.allocation-sharing-help { margin: 14px 0 0; padding: 10px; border-radius: var(--radius); background: var(--accent-dim); color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+.allocation-assignment-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-bottom: 16px; }
+.allocation-assignment-toolbar label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
+.allocation-assignment-toolbar select { width: auto; max-width: 100%; }
+.allocation-assignment-toolbar > span { flex: 1 1 240px; color: var(--text-muted); font-size: 11px; }
+.workload-manage-team { margin-left: 4px; padding: 3px; border: 0; border-radius: 3px; background: transparent; color: var(--accent); cursor: pointer; vertical-align: middle; }
+.workload-manage-team:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .planning-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 
 .org-chart { display: flex; flex-direction: column; gap: 10px; }

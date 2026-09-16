@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
+import { guardClientFields } from '../lib/allocationAssignments'
 import { formatCreatorTarget, packageFormValues, packagePayload, validateClientPackage } from '../lib/clientPackage'
 import ClientPackageFields from '../components/ClientPackageFields'
 import { Plus, Search, Archive, Edit2, LayoutGrid, LayoutList } from 'lucide-react'
 
 function parseIds(val) {
   if (!val) return []
-  if (Array.isArray(val)) return val
-  try { return JSON.parse(val) } catch { return [] }
+  try {
+    const ids = Array.isArray(val) ? val : JSON.parse(val)
+    return Array.isArray(ids) ? [...new Set(ids.filter(id => typeof id === 'string' && id))] : []
+  } catch { return [] }
 }
 function initials(name='') {
   return name.split(' ').map(n=>n[0]).join('').toUpperCase().slice(0,2)||'?'
@@ -40,7 +43,8 @@ function MemberPill({ member, color, onRemove }) {
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onRemove() }}
-          title="Remove"
+          title={`Remove ${member.full_name}`}
+          aria-label={`Remove ${member.full_name}`}
           style={{
             marginLeft:2, width:16, height:16, borderRadius:'50%',
             border:'none', background:'transparent', color,
@@ -58,7 +62,11 @@ function MemberPill({ member, color, onRemove }) {
 // ── MULTI-SELECT DROPDOWN ────────────────────────────────────
 function MultiSelect({ label, ids, members, onChange, color }) {
   const [open, setOpen] = useState(false)
-  const selected = members.filter(m=>ids.includes(m.id))
+  const selected = ids.map(id => members.find(member => member.id === id) || {
+    id,
+    full_name: `Unavailable teammate · ${id.slice(0, 8)}`,
+    unavailable: true,
+  })
   return (
     <div style={{position:'relative'}}>
       <div style={{fontSize:10,fontFamily:'var(--font-mono)',color:'var(--text-muted)',
@@ -76,6 +84,11 @@ function MultiSelect({ label, ids, members, onChange, color }) {
             ))}
         <span style={{marginLeft:'auto',fontSize:10,color:'var(--text-muted)'}}>▾</span>
       </div>
+      {selected.some(member => member.unavailable) && (
+        <p style={{fontSize:11,color:'var(--amber)',margin:'5px 0 0'}}>
+          Unavailable teammates are inactive, missing, or no longer in this role. Their assignments are preserved until you remove them.
+        </p>
+      )}
       {open&&(
         <>
           <div style={{position:'fixed',inset:0,zIndex:90}} onClick={()=>setOpen(false)}/>
@@ -157,13 +170,20 @@ function ClientModal({ client, allMembers, onClose, onSave }) {
     }
     try {
       if (isEdit) {
-        const {data: savedClient, error: saveError} = await supabase
-          .from('clients')
-          .update(payload)
-          .eq('id', client.id)
+        // Assignment arrays and package details are shared with Client Allocations.
+        // Match the values this editor opened so a stale form cannot undo another operator's changes.
+        const updateQuery = guardClientFields(
+          supabase.from('clients').update(payload).eq('id', client.id),
+          client,
+          Object.keys(payload),
+        )
+        const {data: savedClient, error: saveError} = await updateQuery
           .select()
         if (saveError) throw saveError
-        if (!savedClient?.length) throw new Error('The client could not be saved. Please ask the CEO to check your client editing permissions.')
+        if (!savedClient?.length) {
+          await onSave()
+          throw new Error('This client changed since you opened it, or you no longer have editing access. Your draft is still here. Close and reopen the client to load the latest assignments before trying again.')
+        }
       } else {
         const {data:newClient, error: saveError} = await supabase.from('clients')
           .insert({...payload, is_active:true, is_archived:false}).select().single()
@@ -172,7 +192,7 @@ function ClientModal({ client, allMembers, onClose, onSave }) {
         // Client Health derives missing weekly reviews from the roster. Creating
         // a client must not create an unreviewed zero-score health observation.
       }
-      onSave()
+      await onSave()
       onClose()
     } catch (saveError) {
       setError('Save failed: ' + saveError.message)
@@ -184,7 +204,7 @@ function ClientModal({ client, allMembers, onClose, onSave }) {
   const membersFor = (position) => allMembers.filter(m=>m.position===position)
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" onClick={() => !saving && onClose()}>
       <div className="modal" style={{maxWidth:580}} onClick={e=>e.stopPropagation()}>
         <h2 className="modal-title">{isEdit?'Edit Client':'Add Client'}</h2>
 
@@ -217,6 +237,9 @@ function ClientModal({ client, allMembers, onClose, onSave }) {
         {/* Team Assignment */}
         <div className="form-group">
           <label>Team Assignment</label>
+          <p style={{fontSize:12,color:'var(--text-secondary)',margin:'4px 0 8px'}}>
+            Select multiple teammates in each role. Creative strategist, editor, designer, and UGC workload is divided equally within that role. Media buyers are not included in workload calculations.
+          </p>
           <div style={{display:'flex',flexDirection:'column',gap:10,marginTop:4}}>
             {ROLE_GROUPS.map(rg=>(
               <MultiSelect key={rg.key} label={rg.label}
@@ -232,7 +255,7 @@ function ClientModal({ client, allMembers, onClose, onSave }) {
           <button className="btn btn-primary" onClick={handleSave} disabled={saving||!form.name.trim()}>
             {saving?'Saving...':isEdit?'Save Changes':'Add Client'}
           </button>
-          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-ghost" onClick={onClose} disabled={saving}>Cancel</button>
         </div>
       </div>
     </div>

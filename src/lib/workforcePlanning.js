@@ -1,3 +1,5 @@
+import { getClientStrategistIds } from './clientAssignments.js'
+
 export const PLANNING_ROLES = [
   { key: 'creative_strategist', label: 'Creative Strategists', singular: 'Creative Strategist', color: 'var(--green)' },
   { key: 'editor', label: 'Editors', singular: 'Editor', color: 'var(--purple)' },
@@ -29,8 +31,13 @@ export function initials(name = '') {
 
 export function parseIds(value) {
   if (!value) return []
-  if (Array.isArray(value)) return value
-  try { return JSON.parse(value) } catch { return [] }
+  let ids = value
+  if (!Array.isArray(ids)) {
+    try { ids = JSON.parse(value) } catch { return [] }
+  }
+  return Array.isArray(ids)
+    ? [...new Set(ids.filter(id => typeof id === 'string' && id.trim().length > 0))]
+    : []
 }
 
 function conceptCount(client, type) {
@@ -43,18 +50,22 @@ export function buildRosterAllocations({ clients = [], people = [], monthStart =
       .filter(person => person.profile_id)
       .map(person => [`${person.profile_id}:${person.discipline}`, person]),
   )
-  const keysFor = (value, role) => parseIds(value)
-    .map(id => peopleByProfileAndRole.get(`${id}:${role}`)?.source_key)
-    .filter(Boolean)
+  const keysFor = (value, role) => parseIds(parseIds(value)
+    .map(id => peopleByProfileAndRole.get(`${id}:${role}`)?.source_key || `unmapped:${id}:${role}`))
 
   return clients
     .filter(client => client.is_active !== false && !client.is_archived)
     .map(client => {
-      const strategistProfileIds = parseIds(client.cs_ids)
+      const strategistProfileIds = parseIds(getClientStrategistIds(client))
       const designerProfileIds = parseIds(client.designer_ids)
       const editorProfileIds = parseIds(client.editor_ids)
       const ugcManagerProfileIds = parseIds(client.ugc_ids)
       const strategistKeys = keysFor(strategistProfileIds, 'creative_strategist')
+      // The legacy primary column has a foreign key; unresolved shares belong
+      // only in the unconstrained array so month-close can preserve them safely.
+      const primaryStrategistKey = strategistProfileIds
+        .map(id => peopleByProfileAndRole.get(`${id}:creative_strategist`)?.source_key)
+        .find(Boolean) || null
       const videoConcepts = conceptCount(client, 'video')
       const ugcConcepts = conceptCount(client, 'ugc')
       return {
@@ -66,7 +77,7 @@ export function buildRosterAllocations({ clients = [], people = [], monthStart =
         package_type: client.package_type || '',
         ugc_creators_per_month: client.ugc_creators_per_month ?? null,
         seeding_creators_per_month: client.seeding_creators_per_month ?? null,
-        strategist_key: strategistKeys[0] || null,
+        strategist_key: primaryStrategistKey,
         strategist_keys: strategistKeys,
         strategist_profile_ids: strategistProfileIds,
         statics: conceptCount(client, 'static'),
@@ -97,13 +108,13 @@ export function buildAllocationSnapshot(allocations = []) {
     seeding_creators_per_month: item.seeding_creators_per_month ?? null,
     strategist_key: item.strategist_key || null,
     strategist_keys: item.strategist_keys?.length
-      ? item.strategist_keys
+      ? [...item.strategist_keys]
       : item.strategist_key ? [item.strategist_key] : [],
     statics: Number(item.statics || 0),
     videos: Number(item.videos || 0),
-    designer_keys: item.designer_keys || [],
-    editor_keys: item.editor_keys || [],
-    ugc_manager_keys: item.ugc_manager_keys || [],
+    designer_keys: [...(item.designer_keys || [])],
+    editor_keys: [...(item.editor_keys || [])],
+    ugc_manager_keys: [...(item.ugc_manager_keys || [])],
     ugc_enabled: Boolean(item.ugc_enabled),
     notes: item.notes || '',
   }))
@@ -116,26 +127,68 @@ export function statusMeta(status) {
   return { label: 'Available', tone: 'blue' }
 }
 
+function exceeds(value, limit) {
+  const tolerance = Number.EPSILON * Math.max(1, Math.abs(value), Math.abs(limit)) * 16
+  return value - limit > tolerance
+}
+
+function requiredHeadcount(used, unitCapacity) {
+  const ratio = used / unitCapacity
+  const nearestInteger = Math.round(ratio)
+  // Equal fractional shares can sum a few machine epsilons above a whole
+  // capacity. Do not turn floating-point noise into an additional planned hire.
+  return Math.ceil(exceeds(Math.abs(ratio - nearestInteger), 0) ? ratio : nearestInteger)
+}
+
 function standardStatus(utilization) {
-  if (utilization > 100) return 'overloaded'
-  if (utilization >= 80) return 'near_capacity'
-  if (utilization >= 50) return 'healthy'
+  if (exceeds(utilization, 100)) return 'overloaded'
+  if (!exceeds(80, utilization)) return 'near_capacity'
+  if (!exceeds(50, utilization)) return 'healthy'
   return 'available'
 }
 
 function assignmentKeys(item, field, fallbackField) {
-  const keys = item[field] || []
+  const keys = parseIds(item[field])
   if (keys.length) return keys
-  return item[fallbackField] ? [item[fallbackField]] : []
+  return parseIds([item[fallbackField]])
 }
 
-function sharedAssignments(allocations, personKey, field, conceptField) {
+function workloadNumber(value) {
+  const number = Number(value || 0)
+  return Number.isFinite(number) ? Math.max(0, number) : 0
+}
+
+function sharedCreatorTarget(value, divisor) {
+  if (value === null || value === undefined || value === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) && number >= 0 ? number / divisor : null
+}
+
+function formatWorkload(value) {
+  return Number(value).toLocaleString('en-US', { maximumFractionDigits: 1 })
+}
+
+function clientCount(assignments) {
+  return new Set(assignments.map(item => item.client_id || item.source_key || item.id || item)).size
+}
+
+function sharedAssignments(allocations, personKey, field, role) {
   return allocations.flatMap(item => {
     const keys = assignmentKeys(item, field, field === 'strategist_keys' ? 'strategist_key' : '')
     if (!keys.includes(personKey)) return []
-    const divisor = Math.max(keys.length, 1)
-    const sharedValue = Number(item[conceptField] || 0) / divisor
-    return [{ ...item, [conceptField]: Math.round(sharedValue * 10) / 10 }]
+    const divisor = keys.length
+    const assignment = { ...item, assignment_count: divisor, workload_share: 1 / divisor }
+    if (role === 'ugc_manager') {
+      assignment.ugc_creators_per_month = sharedCreatorTarget(item.ugc_creators_per_month, divisor)
+      assignment.seeding_creators_per_month = sharedCreatorTarget(item.seeding_creators_per_month, divisor)
+    } else {
+      assignment.statics = role === 'editor' ? 0 : workloadNumber(item.statics) / divisor
+      assignment.videos = role === 'designer' ? 0 : workloadNumber(item.videos) / divisor
+      for (const field of ['video_concepts', 'ugc_concepts']) {
+        if (Object.hasOwn(item, field)) assignment[field] = role === 'designer' ? 0 : workloadNumber(item[field]) / divisor
+      }
+    }
+    return [assignment]
   })
 }
 
@@ -145,93 +198,89 @@ export function buildWorkloads({ allocations = [], people = [], settings = DEFAU
   const activePeople = people.filter(person => person.is_active !== false)
 
   const strategists = activePeople.filter(person => person.discipline === 'creative_strategist').map(person => {
-    const owned = allocations.flatMap(item => {
-      const keys = assignmentKeys(item, 'strategist_keys', 'strategist_key')
-      if (!keys.includes(person.source_key)) return []
-      const divisor = Math.max(keys.length, 1)
-      return [{
-        ...item,
-        statics: Math.round((Number(item.statics || 0) / divisor) * 10) / 10,
-        videos: Math.round((Number(item.videos || 0) / divisor) * 10) / 10,
-      }]
-    })
-    const clients = owned.length
+    const owned = sharedAssignments(allocations, person.source_key, 'strategist_keys', 'creative_strategist')
+    const clients = clientCount(owned)
     const concepts = owned.reduce((sum, item) => sum + Number(item.statics || 0) + Number(item.videos || 0), 0)
-    const utilization = safeSettings.cs_max_concepts ? Math.round((concepts / safeSettings.cs_max_concepts) * 100) : 0
-    const overloaded = concepts > safeSettings.cs_max_concepts
-    const inHealthyBand = concepts >= safeSettings.cs_min_concepts
-    const nearCapacity = concepts >= safeSettings.cs_max_concepts * 0.9
+    const utilization = safeSettings.cs_max_concepts ? (concepts / safeSettings.cs_max_concepts) * 100 : 0
+    const overloaded = exceeds(concepts, safeSettings.cs_max_concepts)
+    const inHealthyBand = !exceeds(safeSettings.cs_min_concepts, concepts)
+    const nearCapacity = !exceeds(safeSettings.cs_max_concepts * 0.9, concepts)
     return {
       ...person,
       clients,
+      clientEquivalents: owned.reduce((sum, item) => sum + item.workload_share, 0),
       concepts,
       statics: owned.reduce((sum, item) => sum + Number(item.statics || 0), 0),
       videos: owned.reduce((sum, item) => sum + Number(item.videos || 0), 0),
-      utilization,
+      utilization: Math.round(utilization),
       status: overloaded ? 'overloaded' : nearCapacity ? 'near_capacity' : inHealthyBand ? 'healthy' : 'available',
       assignments: owned,
-      capacityLabel: `${concepts}/${safeSettings.cs_max_concepts} concepts · ${clients} clients`,
+      capacityLabel: `${formatWorkload(concepts)}/${formatWorkload(safeSettings.cs_max_concepts)} concepts · ${clients} clients`,
     }
   })
 
   const editors = activePeople.filter(person => person.discipline === 'editor').map(person => {
-    const assigned = sharedAssignments(allocations, person.source_key, 'editor_keys', 'videos')
+    const assigned = sharedAssignments(allocations, person.source_key, 'editor_keys', 'editor')
     const videos = assigned.reduce((sum, item) => sum + Number(item.videos || 0), 0)
     const dailyCapacity = Number(person.daily_capacity || safeSettings.editor_daily_capacity)
     const capacity = dailyCapacity * workingDays
-    const utilization = capacity ? Math.round((videos / capacity) * 100) : 0
+    const utilization = capacity ? (videos / capacity) * 100 : 0
     return {
       ...person,
-      clients: assigned.length,
+      clients: clientCount(assigned),
+      clientEquivalents: assigned.reduce((sum, item) => sum + item.workload_share, 0),
       concepts: videos,
       videos,
-      utilization,
+      utilization: Math.round(utilization),
       status: standardStatus(utilization),
       assignments: assigned,
-      capacityLabel: `${videos}/${capacity} video concepts`,
+      capacityLabel: `${formatWorkload(videos)}/${formatWorkload(capacity)} video concepts`,
     }
   })
 
   const designers = activePeople.filter(person => person.discipline === 'designer').map(person => {
-    const assigned = sharedAssignments(allocations, person.source_key, 'designer_keys', 'statics')
+    const assigned = sharedAssignments(allocations, person.source_key, 'designer_keys', 'designer')
     const statics = assigned.reduce((sum, item) => sum + Number(item.statics || 0), 0)
     const dailyCapacity = Number(person.daily_capacity || safeSettings.designer_daily_capacity)
     const capacity = dailyCapacity * workingDays
-    const utilization = capacity ? Math.round((statics / capacity) * 100) : 0
+    const utilization = capacity ? (statics / capacity) * 100 : 0
     return {
       ...person,
-      clients: assigned.length,
+      clients: clientCount(assigned),
+      clientEquivalents: assigned.reduce((sum, item) => sum + item.workload_share, 0),
       concepts: statics,
       statics,
-      utilization,
+      utilization: Math.round(utilization),
       status: standardStatus(utilization),
       assignments: assigned,
-      capacityLabel: `${statics}/${capacity} static concepts`,
+      capacityLabel: `${formatWorkload(statics)}/${formatWorkload(capacity)} static concepts`,
     }
   })
 
   const ugcManagers = activePeople.filter(person => person.discipline === 'ugc_manager').map(person => {
-    const assigned = allocations.filter(item => (item.ugc_manager_keys || []).includes(person.source_key))
-    const clients = assigned.length
+    const assigned = sharedAssignments(allocations, person.source_key, 'ugc_manager_keys', 'ugc_manager')
+    const clients = clientCount(assigned)
+    const clientEquivalents = assigned.reduce((sum, item) => sum + item.workload_share, 0)
     const capacity = Number(person.max_clients || safeSettings.ugc_max_clients)
-    const utilization = capacity ? Math.round((clients / capacity) * 100) : 0
+    const utilization = capacity ? (clientEquivalents / capacity) * 100 : 0
     return {
       ...person,
       clients,
-      utilization,
+      clientEquivalents,
+      utilization: Math.round(utilization),
       status: standardStatus(utilization),
       assignments: assigned,
-      capacityLabel: `${clients}/${capacity} clients`,
+      capacityLabel: `${formatWorkload(clientEquivalents)}/${formatWorkload(capacity)} client equivalents · ${clients} clients`,
     }
   })
 
   const unmatchedKeys = new Set()
   allocations.forEach(item => {
     assignmentKeys(item, 'strategist_keys', 'strategist_key').forEach(key => {
-      if (key && !byKey.get(key)?.profile_id) unmatchedKeys.add(key)
+      if (key && (!byKey.get(key)?.profile_id || byKey.get(key)?.is_active === false)) unmatchedKeys.add(key)
     })
-    ;[...(item.editor_keys || []), ...(item.designer_keys || []), ...(item.ugc_manager_keys || [])].forEach(key => {
-      if (key && !byKey.get(key)?.profile_id) unmatchedKeys.add(key)
+    ;[...parseIds(item.editor_keys), ...parseIds(item.designer_keys), ...parseIds(item.ugc_manager_keys)].forEach(key => {
+      if (key && (!byKey.get(key)?.profile_id || byKey.get(key)?.is_active === false)) unmatchedKeys.add(key)
     })
   })
 
@@ -257,7 +306,7 @@ function roleCapacity(roleKey, workloads, settings, workingDays) {
     }
   }
   return {
-    used: workloads.reduce((sum, person) => sum + person.clients, 0),
+    used: workloads.reduce((sum, person) => sum + (person.clientEquivalents ?? person.clients), 0),
     capacity: workloads.reduce((sum, person) => sum + Number(person.max_clients || settings.ugc_max_clients), 0),
     unitCapacity: settings.ugc_max_clients,
     unit: 'clients',
@@ -273,7 +322,7 @@ export function buildHiringSignals({ workloadsByRole, settings = DEFAULT_CAPACIT
     const overloaded = workloads.filter(person => person.status === 'overloaded')
     const near = workloads.filter(person => person.status === 'near_capacity')
     const requiredPeople = capacity.unitCapacity
-      ? Math.max(0, Math.ceil(capacity.used / capacity.unitCapacity) - workloads.length)
+      ? Math.max(0, requiredHeadcount(capacity.used, capacity.unitCapacity) - workloads.length)
       : 0
 
     let signal = 'hold'
@@ -339,7 +388,7 @@ export function projectGrowthScenario({
     const projectedUsed = Math.max(0, signal.used + loadChange)
     const projectedUtilization = signal.capacity ? Math.round((projectedUsed / signal.capacity) * 100) : 0
     const peopleNeeded = signal.unitCapacity
-      ? Math.max(0, Math.ceil(projectedUsed / signal.unitCapacity) - signal.headcount)
+      ? Math.max(0, requiredHeadcount(projectedUsed, signal.unitCapacity) - signal.headcount)
       : 0
 
     return { ...signal, loadChange, projectedUsed, projectedUtilization, peopleNeeded }

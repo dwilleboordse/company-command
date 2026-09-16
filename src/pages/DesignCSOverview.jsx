@@ -6,6 +6,7 @@ import { loadDesignCsData, persistVirtualPeople } from '../lib/designCsData'
 import { buildAllocationSnapshot, buildRosterAllocations, buildWorkloads, formatMonth, initials, nextMonthStart, parseIds, roleLabel, statusMeta } from '../lib/workforcePlanning'
 import ClientPackageFields from '../components/ClientPackageFields'
 import { formatCreatorTarget, packageFormValues, packagePayload, validateClientPackage } from '../lib/clientPackage'
+import { guardClientFields, planAssignmentChange } from '../lib/allocationAssignments'
 import './WorkforcePlanning.css'
 
 const WORKLOAD_DRAG_MIME = 'application/x-company-command-client'
@@ -29,6 +30,14 @@ function formatConcepts(value) {
   return Number.isInteger(Number(value)) ? Number(value) : Number(value).toFixed(1)
 }
 
+function formatSharedTarget(value) {
+  return value == null || value === '' ? 'Not set' : formatConcepts(value)
+}
+
+function equalShareSummary(count, details = '') {
+  return count ? `${count} assigned · ${formatConcepts(100 / count)}% each${details ? ` · ${details}` : ''}` : 'Select one or more team members.'
+}
+
 function buildCreativeAllocation(current, concepts, isEdit) {
   const count = Number(concepts || 0)
   return {
@@ -47,7 +56,7 @@ function CapacityBar({ utilization, status }) {
   )
 }
 
-function WorkloadClientBreakdown({ assignments, showConcepts, type, canDrag, onSelect, onDragStart, onDragEnd }) {
+function WorkloadClientBreakdown({ assignments, showConcepts, type, canDrag, onSelect, onDragStart, onDragEnd, onManage }) {
   const sortedAssignments = [...assignments].sort((a, b) => a.client_name_snapshot.localeCompare(b.client_name_snapshot))
   const showCreatorTargets = type === 'ugc_manager'
 
@@ -74,7 +83,7 @@ function WorkloadClientBreakdown({ assignments, showConcepts, type, canDrag, onS
                     type="button"
                     className="workload-client-name workload-client-drag-handle"
                     draggable
-                    title={`Drag or select ${item.client_name_snapshot} to reassign it`}
+                    title={`Drag or select ${item.client_name_snapshot} to share or move this assignment`}
                     onPointerDown={event => {
                       if (event.pointerType !== 'mouse') onSelect?.(item, type)
                     }}
@@ -89,22 +98,23 @@ function WorkloadClientBreakdown({ assignments, showConcepts, type, canDrag, onS
                     <span>{item.client_name_snapshot}</span>
                   </button>
                 ) : <span className="workload-client-name">{item.client_name_snapshot}</span>}
-                {showCreatorTargets && (item.ugc_manager_keys || []).length > 1 && <span className="workload-shared-target">Shared client target</span>}
+                {canDrag && <button type="button" className="workload-manage-team" aria-label={`Manage team for ${item.client_name_snapshot}`} onClick={() => onManage(item.client_id)}><Pencil size={11}/></button>}
+                {item.assignment_count > 1 && <span className="workload-shared-target">1/{item.assignment_count} share · {formatConcepts(item.workload_share * 100)}%</span>}
               </td>
               {showConcepts && <td><strong>{formatConcepts(item.statics || 0)}</strong></td>}
               {showConcepts && <td><strong>{formatConcepts(item.videos || 0)}</strong></td>}
-              {showCreatorTargets && <td><strong>{formatCreatorTarget(item.ugc_creators_per_month)}</strong></td>}
-              {showCreatorTargets && <td><strong>{formatCreatorTarget(item.seeding_creators_per_month)}</strong></td>}
+              {showCreatorTargets && <td><strong>{formatSharedTarget(item.ugc_creators_per_month)}</strong></td>}
+              {showCreatorTargets && <td><strong>{formatSharedTarget(item.seeding_creators_per_month)}</strong></td>}
             </tr>
           ))}
         </tbody>
       </table>
-      {showCreatorTargets && <p className="workload-target-note">Creators to source per month. Shared client targets are shown in full.</p>}
+      <p className="workload-target-note">{showCreatorTargets ? 'Monthly sourcing share, split equally between assigned UGC managers. Fractions are planning averages.' : 'This person’s concept workload, split equally within their role.'}</p>
     </div>
   )
 }
 
-function WorkloadCard({ person, type, canAcceptDrop, isDropReady, onDropClient, onSelect, onDragStart, onDragEnd }) {
+function WorkloadCard({ person, type, canAcceptDrop, isDropReady, onDropClient, onSelect, onDragStart, onDragEnd, onManage, assignmentMode }) {
   const meta = statusMeta(person.status)
   const showConcepts = ['creative_strategist', 'editor', 'designer'].includes(type)
   return (
@@ -113,7 +123,7 @@ function WorkloadCard({ person, type, canAcceptDrop, isDropReady, onDropClient, 
       onDragOver={event => {
         if (!canAcceptDrop) return
         event.preventDefault()
-        event.dataTransfer.dropEffect = 'move'
+        event.dataTransfer.dropEffect = assignmentMode === 'share' ? 'copy' : 'move'
       }}
       onDrop={event => {
         if (!canAcceptDrop) return
@@ -125,7 +135,7 @@ function WorkloadCard({ person, type, canAcceptDrop, isDropReady, onDropClient, 
         <div className="planning-avatar">{initials(person.display_name)}</div>
         <div className="workload-person">
           <strong>{person.display_name}</strong>
-          <span>{type === 'creative_strategist' ? `${person.clients} clients · ${person.concepts} concepts` : person.capacityLabel}</span>
+          <span>{type === 'creative_strategist' ? `${person.clients} clients · ${formatConcepts(person.concepts)} concepts` : person.capacityLabel}</span>
         </div>
         <span className={`badge ${meta.tone}`}>{meta.label}</span>
       </div>
@@ -135,19 +145,20 @@ function WorkloadCard({ person, type, canAcceptDrop, isDropReady, onDropClient, 
       </div>
       {type === 'creative_strategist' && (
         <div className="workload-split">
-          <span>{person.statics} static concepts</span>
-          <span>{person.videos} video concepts</span>
+          <span>{formatConcepts(person.statics)} static concepts</span>
+          <span>{formatConcepts(person.videos)} video concepts</span>
         </div>
       )}
-      {isDropReady && <button type="button" className="workload-drop-hint" onClick={event => onDropClient(event, person, type)}>Drop or click to assign here</button>}
+      {isDropReady && <button type="button" className="workload-drop-hint" onClick={event => onDropClient(event, person, type)}>{assignmentMode === 'share' ? 'Share client with this person' : 'Move selected share here'}</button>}
       <WorkloadClientBreakdown
         assignments={person.assignments}
         showConcepts={showConcepts}
         type={type}
         canDrag={Boolean(onDragStart)}
-        onSelect={onSelect}
-        onDragStart={onDragStart}
+        onSelect={(item, role) => onSelect(item, role, person.profile_id)}
+        onDragStart={(event, item, role) => onDragStart?.(event, item, role, person.profile_id)}
         onDragEnd={onDragEnd}
+        onManage={onManage}
       />
     </article>
   )
@@ -181,7 +192,7 @@ function UnassignedWorkloads({ allocations, type, onSelect, onDragStart, onDragE
   )
 }
 
-function WorkloadSection({ title, subtitle, people, allocations, type, draggedRole, onDropClient, onSelect, onDragStart, onDragEnd }) {
+function WorkloadSection({ title, subtitle, people, allocations, type, draggedRole, onDropClient, onSelect, onDragStart, onDragEnd, onManage, assignmentMode }) {
   const sorted = [...people].sort((a, b) => b.utilization - a.utilization || a.display_name.localeCompare(b.display_name))
   const unassigned = onDragStart ? allocations.filter(item => {
     if (type === 'creative_strategist') return !(item.strategist_keys?.length || item.strategist_key)
@@ -211,6 +222,8 @@ function WorkloadSection({ title, subtitle, people, allocations, type, draggedRo
             onSelect={onSelect}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
+            onManage={onManage}
+            assignmentMode={assignmentMode}
           />
         ))}
         {!sorted.length && <div className="empty-state"><p>No active people are mapped to this role.</p></div>}
@@ -219,12 +232,15 @@ function WorkloadSection({ title, subtitle, people, allocations, type, draggedRo
   )
 }
 
-function MultiChecks({ label, options, value, onChange }) {
+function MultiChecks({ label, options, value, onChange, summary }) {
+  const visibleOptions = options.filter(person => person.profile_id)
+  const missingIds = value.filter(id => !visibleOptions.some(person => person.profile_id === id))
   return (
     <fieldset className="planning-checks">
-      <legend>{label}</legend>
+      <legend>{label} · select multiple</legend>
+      <p className="allocation-share-summary">{summary || equalShareSummary(value.length)}</p>
       <div>
-        {options.map(person => {
+        {visibleOptions.map(person => {
           const checked = value.includes(person.profile_id)
           return (
             <label key={person.profile_id}>
@@ -237,6 +253,7 @@ function MultiChecks({ label, options, value, onChange }) {
             </label>
           )
         })}
+        {missingIds.map(id => <label key={id}><input type="checkbox" checked onChange={() => onChange(value.filter(valueId => valueId !== id))}/><span>Unavailable assignment · {id.slice(0, 8)}</span></label>)}
       </div>
     </fieldset>
   )
@@ -258,8 +275,40 @@ function AllocationModal({ allocation, monthStart, clients, people, onClose, onS
   } : createEmptyAllocationForm())
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const modalRef = useRef(null)
+  const savingRef = useRef(false)
+
+  useEffect(() => {
+    const previousFocus = document.activeElement
+    modalRef.current?.querySelector('button, input:not(:disabled), select:not(:disabled)')?.focus()
+    return () => previousFocus?.focus?.()
+  }, [])
+
+  function handleModalKey(event) {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      if (!savingRef.current) onClose()
+    }
+    if (event.key === 'Tab') {
+      const elements = [...modalRef.current.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)')]
+      const first = elements[0], last = elements.at(-1)
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
+    }
+  }
 
   const optionsFor = role => people.filter(person => person.discipline === role && person.is_active !== false)
+  const shareSummary = (ids, role) => {
+    const count = ids.length
+    const statics = Number(form.statics || 0)
+    const videos = Number(form.video_concepts || 0) + Number(form.ugc_concepts || 0)
+    if (!count) return equalShareSummary(0)
+    const detail = role === 'editor' ? `${formatConcepts(videos / count)} video concepts per person`
+      : role === 'designer' ? `${formatConcepts(statics / count)} static concepts per person`
+        : role === 'creative_strategist' ? `${formatConcepts((statics + videos) / count)} concepts per person`
+          : `${formatSharedTarget(form.ugc_creators_per_month === '' ? null : Number(form.ugc_creators_per_month) / count)} UGC / ${formatSharedTarget(form.seeding_creators_per_month === '' ? null : Number(form.seeding_creators_per_month) / count)} seeding creators per person`
+    return equalShareSummary(count, detail)
+  }
 
   async function save(event) {
     event.preventDefault()
@@ -288,6 +337,7 @@ function AllocationModal({ allocation, monthStart, clients, people, onClose, onS
       return
     }
     setSaving(true)
+    savingRef.current = true
     setError('')
     try {
       const selectedProfileIds = [
@@ -313,7 +363,7 @@ function AllocationModal({ allocation, monthStart, clients, people, onClose, onS
         },
       }
       const saveQuery = isEdit
-        ? supabase.from('clients').update(payload).eq('id', client.id)
+        ? guardClientFields(supabase.from('clients').update(payload).eq('id', client.id), client, Object.keys(payload))
         : supabase.from('clients').insert({
           ...payload,
           name: clientName,
@@ -322,6 +372,7 @@ function AllocationModal({ allocation, monthStart, clients, people, onClose, onS
           is_archived: false,
         })
       const { data: savedClient, error: saveError } = await saveQuery.select('*').single()
+      if (saveError?.code === 'PGRST116') throw new Error('This client changed while you were editing. Close and refresh before trying again; no changes were saved.')
       if (saveError) throw saveError
       if (!savedClient) throw new Error(`The Client Roster did not accept this ${isEdit ? 'update' : 'new client'}.`)
       await onSaved({ client: savedClient, isNew: !isEdit })
@@ -329,19 +380,20 @@ function AllocationModal({ allocation, monthStart, clients, people, onClose, onS
     } catch (saveError) {
       setError(saveError.message || 'Unable to save this allocation.')
     } finally {
+      savingRef.current = false
       setSaving(false)
     }
   }
 
   return (
-    <div className="modal-overlay" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}>
-      <form className="modal planning-modal" role="dialog" aria-modal="true" aria-labelledby="allocation-title" onSubmit={save}>
+    <div className="modal-overlay" role="presentation" onMouseDown={event => !saving && event.target === event.currentTarget && onClose()}>
+      <form ref={modalRef} className="modal planning-modal" role="dialog" aria-modal="true" aria-labelledby="allocation-title" onSubmit={save} onKeyDown={handleModalKey}>
         <div className="planning-modal-header">
           <div>
             <h2 id="allocation-title" className="modal-title">{isEdit ? 'Edit client allocation' : 'Add client allocation'}</h2>
             <p>{formatMonth(monthStart)} · {isEdit ? 'saves to' : 'creates a new active client in'} the Client Roster</p>
           </div>
-          <button type="button" className="btn btn-ghost btn-icon" onClick={onClose} aria-label="Close"><X size={16}/></button>
+          <button type="button" className="btn btn-ghost btn-icon" disabled={saving} onClick={onClose} aria-label="Close"><X size={16}/></button>
         </div>
 
         <label className="field-label">Client</label>
@@ -355,7 +407,8 @@ function AllocationModal({ allocation, monthStart, clients, people, onClose, onS
 
         <ClientPackageFields value={form} onChange={value => setForm(current => ({ ...current, ...value }))} requirePackage={!isEdit} showConcepts={false}/>
 
-        <MultiChecks label="Creative strategists" options={optionsFor('creative_strategist')} value={form.strategist_profile_ids} onChange={strategist_profile_ids => setForm(current => ({ ...current, strategist_profile_ids }))}/>
+        <p className="allocation-sharing-help">Assign as many people as needed in each role. Workload is divided equally within that role; the client’s total package stays unchanged.</p>
+        <MultiChecks label="Creative strategists" summary={shareSummary(form.strategist_profile_ids, 'creative_strategist')} options={optionsFor('creative_strategist')} value={form.strategist_profile_ids} onChange={strategist_profile_ids => setForm(current => ({ ...current, strategist_profile_ids }))}/>
 
         <div className="planning-form-grid">
           <label><span>Static concepts</span><input type="number" min="0" step="1" max="2147483647" value={form.statics} onChange={event => setForm(current => ({ ...current, statics: event.target.value }))}/></label>
@@ -363,13 +416,13 @@ function AllocationModal({ allocation, monthStart, clients, people, onClose, onS
           <label><span>UGC video concepts</span><input type="number" min="0" step="1" max="2147483647" value={form.ugc_concepts} onChange={event => setForm(current => ({ ...current, ugc_concepts: event.target.value }))}/></label>
         </div>
 
-        <MultiChecks label="Designers" options={optionsFor('designer')} value={form.designer_profile_ids} onChange={designer_profile_ids => setForm(current => ({ ...current, designer_profile_ids }))}/>
-        <MultiChecks label="Editors" options={optionsFor('editor')} value={form.editor_profile_ids} onChange={editor_profile_ids => setForm(current => ({ ...current, editor_profile_ids }))}/>
-        <MultiChecks label="UGC managers" options={optionsFor('ugc_manager')} value={form.ugc_manager_profile_ids} onChange={ugc_manager_profile_ids => setForm(current => ({ ...current, ugc_manager_profile_ids }))}/>
+        <MultiChecks label="Designers" summary={shareSummary(form.designer_profile_ids, 'designer')} options={optionsFor('designer')} value={form.designer_profile_ids} onChange={designer_profile_ids => setForm(current => ({ ...current, designer_profile_ids }))}/>
+        <MultiChecks label="Editors" summary={shareSummary(form.editor_profile_ids, 'editor')} options={optionsFor('editor')} value={form.editor_profile_ids} onChange={editor_profile_ids => setForm(current => ({ ...current, editor_profile_ids }))}/>
+        <MultiChecks label="UGC managers" summary={shareSummary(form.ugc_manager_profile_ids, 'ugc_manager')} options={optionsFor('ugc_manager')} value={form.ugc_manager_profile_ids} onChange={ugc_manager_profile_ids => setForm(current => ({ ...current, ugc_manager_profile_ids }))}/>
 
-        {error && <div className="planning-error">{error}</div>}
+        {error && <div className="planning-error" role="alert">{error}</div>}
         <div className="planning-modal-actions">
-          <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn btn-ghost" disabled={saving} onClick={onClose}>Cancel</button>
           <button type="submit" className="btn btn-primary" disabled={saving || (isEdit ? !form.client_id : !form.client_name.trim())}>{saving ? 'Saving…' : isEdit ? 'Save to Client Roster' : 'Create in Client Roster'}</button>
         </div>
       </form>
@@ -382,7 +435,7 @@ function AllocationTable({ allocations, peopleByKey, onEdit, isLive }) {
     <div className="card planning-table-card">
       <div className="table-wrap">
         <table className="planning-table planning-allocation-table">
-          <thead><tr><th>Client</th><th>Strategist</th><th>Concepts</th><th>UGC creators / month</th><th>Seeding creators / month</th><th>Designers</th><th>Editors</th><th>UGC managers</th><th></th></tr></thead>
+          <thead><tr><th>Client</th><th>Strategists</th><th>Concepts</th><th>UGC creators / month</th><th>Seeding creators / month</th><th>Designers</th><th>Editors</th><th>UGC managers</th><th></th></tr></thead>
           <tbody>
             {allocations.map(item => {
               const strategistKeys = item.strategist_keys?.length ? item.strategist_keys : item.strategist_key ? [item.strategist_key] : []
@@ -393,13 +446,13 @@ function AllocationTable({ allocations, peopleByKey, onEdit, isLive }) {
               return (
                 <tr key={item.id}>
                   <td><strong>{item.client_name_snapshot}</strong><span className="table-subline">{item.package_type || 'Package not set'}</span>{!item.client_id && <span className="legacy-label">Legacy match needed</span>}</td>
-                  <td>{strategists || 'Unassigned'}</td>
+                  <td>{strategists || 'Unassigned'}{strategistKeys.length > 1 && <span className="table-subline">{equalShareSummary(strategistKeys.length)}</span>}</td>
                   <td><strong>{formatConcepts(Number(item.statics || 0) + Number(item.videos || 0))}</strong><span className="table-subline">{formatConcepts(item.statics)} static · {formatConcepts(item.videos)} video</span></td>
                   <td>{formatCreatorTarget(item.ugc_creators_per_month)}</td>
                   <td>{formatCreatorTarget(item.seeding_creators_per_month)}</td>
-                  <td>{designers || '—'}</td>
-                  <td>{editors || '—'}</td>
-                  <td>{ugc || '—'}</td>
+                  <td>{designers || '—'}{parseIds(item.designer_keys).length > 1 && <span className="table-subline">{equalShareSummary(parseIds(item.designer_keys).length)}</span>}</td>
+                  <td>{editors || '—'}{parseIds(item.editor_keys).length > 1 && <span className="table-subline">{equalShareSummary(parseIds(item.editor_keys).length)}</span>}</td>
+                  <td>{ugc || '—'}{parseIds(item.ugc_manager_keys).length > 1 && <span className="table-subline">{equalShareSummary(parseIds(item.ugc_manager_keys).length)}</span>}</td>
                   <td>
                     {isLive
                       ? <div className="planning-row-actions"><button type="button" className="btn btn-ghost btn-icon btn-sm" onClick={() => onEdit(item)} aria-label={`Edit ${item.client_name_snapshot}`}><Pencil size={13}/></button></div>
@@ -481,6 +534,9 @@ export default function DesignCSOverview() {
   const draggedAllocationRef = useRef(null)
   const [draggedRole, setDraggedRole] = useState(null)
   const [syncMessage, setSyncMessage] = useState('')
+  const [assignmentMode, setAssignmentMode] = useState('share')
+  const [assignmentSaving, setAssignmentSaving] = useState(false)
+  const assignmentSavingRef = useRef(false)
 
   async function load(keepMonth = true) {
     setError('')
@@ -555,16 +611,16 @@ export default function DesignCSOverview() {
     }
   }
 
-  function selectClientForMove(allocation, type) {
-    if (!isLiveMonth || !allocation.client_id) return
-    draggedAllocationRef.current = { allocation, type }
+  function selectClientForMove(allocation, type, sourceProfileId) {
+    if (!isLiveMonth || assignmentSavingRef.current || !allocation.client_id) return
+    draggedAllocationRef.current = { allocation, type, sourceProfileId }
     setDraggedRole(type)
   }
 
-  function startClientDrag(event, allocation, type) {
-    selectClientForMove(allocation, type)
-    event.dataTransfer.effectAllowed = 'move'
-    event.dataTransfer.setData(WORKLOAD_DRAG_MIME, JSON.stringify({ clientId: allocation.client_id, type }))
+  function startClientDrag(event, allocation, type, sourceProfileId) {
+    selectClientForMove(allocation, type, sourceProfileId)
+    event.dataTransfer.effectAllowed = 'copyMove'
+    event.dataTransfer.setData(WORKLOAD_DRAG_MIME, JSON.stringify({ clientId: allocation.client_id, type, sourceProfileId }))
     event.dataTransfer.setData('text/plain', allocation.client_id)
   }
 
@@ -578,6 +634,7 @@ export default function DesignCSOverview() {
   }
 
   async function moveClient(event, person, type) {
+    if (!isLiveMonth || assignmentSavingRef.current) return
     let transferred = null
     try {
       const raw = event?.dataTransfer?.getData(WORKLOAD_DRAG_MIME)
@@ -589,43 +646,38 @@ export default function DesignCSOverview() {
     const selectedType = transferred?.type || selected?.type
     const clientId = transferred?.clientId || event?.dataTransfer?.getData('text/plain') || selected?.allocation?.client_id
     if (!clientId || selectedType !== type || !person.profile_id) return
-    const rosterField = {
-      creative_strategist: 'cs_ids',
-      editor: 'editor_ids',
-      designer: 'designer_ids',
-      ugc_manager: 'ugc_ids',
-    }[type]
     const client = data.clients.find(item => item.id === clientId)
-    if (!client || !rosterField) return
-    const nextIds = [person.profile_id]
-    const currentIds = parseIds(client[rosterField])
+    if (!client) return
+    const change = planAssignmentChange(client, type, person.profile_id, transferred?.sourceProfileId || selected?.sourceProfileId, assignmentMode)
     draggedAllocationRef.current = null
     setDraggedRole(null)
-    if (currentIds.length === 1 && currentIds[0] === person.profile_id) return
+    if (!change?.changed) return
 
     setError('')
     setSyncMessage('')
-    const updates = {
-      [rosterField]: nextIds,
-      ...(type === 'creative_strategist' ? { assigned_cs_id: person.profile_id } : {}),
+    assignmentSavingRef.current = true
+    setAssignmentSaving(true)
+    try {
+      await persistVirtualPeople([person])
+      const { data: savedClient, error: moveError } = await guardClientFields(
+        supabase.from('clients').update(change.updates).eq('id', clientId), client, Object.keys(change.updates),
+      ).select('*').single()
+      if (moveError || !savedClient) throw new Error(moveError?.code === 'PGRST116'
+        ? 'This assignment changed elsewhere. Refresh and try again; the other team member’s change has been preserved.'
+        : moveError?.message || 'The Client Roster did not accept this assignment change.')
+      setData(current => ({ ...current, clients: current.clients.map(item => item.id === clientId ? savedClient : item) }))
+      setSyncMessage(`${client.name}: ${assignmentMode === 'share' ? 'shared with' : 'selected share moved to'} ${person.display_name}. ${change.ids.length} assigned in this role; workload is split equally. Client Roster is in sync.`)
+    } catch (moveError) {
+      setError(moveError.message || 'Unable to save this assignment. Refresh and try again.')
+    } finally {
+      assignmentSavingRef.current = false
+      setAssignmentSaving(false)
     }
-    setData(current => ({
-      ...current,
-      clients: current.clients.map(item => item.id === clientId ? { ...item, ...updates } : item),
-    }))
+  }
 
-    const { data: savedClient, error: moveError } = await supabase
-      .from('clients')
-      .update(updates)
-      .eq('id', clientId)
-      .select('id')
-      .single()
-    if (moveError || !savedClient) {
-      setError(moveError?.message || 'The Client Roster did not accept this assignment change.')
-      await load(true)
-      return
-    }
-    setSyncMessage(`${client.name} moved to ${person.display_name}. Client Roster and workload are now in sync.`)
+  function manageClientTeam(clientId) {
+    const allocation = liveAllocations.find(item => item.client_id === clientId)
+    if (isLiveMonth && allocation) setEditing(allocation)
   }
 
   if (!isCEO && !isOps) return <div className="page-body"><div className="empty-state"><p>CEO or Operations access required.</p></div></div>
@@ -643,7 +695,8 @@ export default function DesignCSOverview() {
           <p className="page-subtitle">One operating view of client ownership, monthly workload, and available team capacity.</p>
         </div>
         <div className="planning-header-actions">
-          {tab !== 'org' && <select aria-label="Month" value={selectedMonth} onChange={event => setSelectedMonth(event.target.value)}>{data?.months.map(month => <option key={month.month_start} value={month.month_start}>{month.label}</option>)}</select>}
+          <button type="button" className="btn btn-ghost" disabled={assignmentSaving || cloning} onClick={() => load(true)}>Refresh</button>
+          {tab !== 'org' && <select aria-label="Month" value={selectedMonth} disabled={assignmentSaving || cloning} onChange={event => { draggedAllocationRef.current = null; setDraggedRole(null); setSelectedMonth(event.target.value) }}>{data?.months.map(month => <option key={month.month_start} value={month.month_start}>{month.label}</option>)}</select>}
           {tab === 'allocations' && isLiveMonth && <button type="button" className="btn btn-primary" onClick={() => setEditing(null)}><Plus size={14}/>Add client</button>}
           {tab === 'allocations' && isLiveMonth && <button type="button" className="btn btn-ghost" onClick={closeMonthAndStartNext} disabled={cloning || !selectedMonth}><LockKeyhole size={14}/>{cloning ? 'Closing month…' : `Close ${formatMonth(selectedMonth)} & start ${formatMonth(nextMonthStart(selectedMonth))}`}</button>}
         </div>
@@ -669,20 +722,26 @@ export default function DesignCSOverview() {
 
         {tab === 'workload' && (
           <>
-            {isLiveMonth && <div className="planning-roster-source"><CheckCircle2 size={15}/><span><strong>Live from Client Roster.</strong> Drag any client row onto another person in the same role to reassign it everywhere and recalculate workload immediately.</span></div>}
+            {isLiveMonth && <div className="planning-roster-source"><CheckCircle2 size={15}/><span><strong>Equal workload sharing.</strong> Add multiple people per role using a client’s pencil button, or drag/click a client and then another teammate. CS share all concepts, editors share video, designers share statics, and UGC managers share client load and sourcing targets.</span></div>}
+            {isLiveMonth && <div className="allocation-assignment-toolbar">
+              <label>Assignment action <select aria-label="Assignment action" value={assignmentMode} disabled={assignmentSaving} onChange={event => setAssignmentMode(event.target.value)}><option value="share">Share with another teammate</option><option value="move">Move this person’s share</option></select></label>
+              <span>{assignmentMode === 'share' ? 'Keeps existing teammates and divides the role’s workload equally.' : 'Replaces only the selected person; other assigned teammates stay.'}</span>
+              {draggedRole && <button type="button" className="btn btn-ghost btn-sm" onClick={() => { draggedAllocationRef.current = null; setDraggedRole(null) }}>Cancel selection</button>}
+              {assignmentSaving && <span role="status">Saving assignment…</span>}
+            </div>}
             {!isLiveMonth && <div className="planning-history-source"><Copy size={15}/><span><strong>Historical snapshot.</strong> Select the latest month to edit roster assignments or use drag and drop.</span></div>}
-            {workloads.unmatchedKeys.length > 0 && <div className="planning-notice"><AlertTriangle size={15}/><span><strong>{workloads.unmatchedKeys.length} legacy team record{workloads.unmatchedKeys.length === 1 ? '' : 's'} need matching.</strong> Their historical work is preserved, but they are not counted as active Company Command headcount.</span></div>}
-            <WorkloadSection title="Creative strategists" subtitle={`Healthy range: ${data.settings.cs_min_concepts}–${data.settings.cs_max_concepts} concepts per month. Client count remains visible as context.`} people={workloads.strategists} allocations={monthAllocations} type="creative_strategist" draggedRole={draggedRole} onDropClient={moveClient} onSelect={selectClientForMove} onDragStart={isLiveMonth ? startClientDrag : undefined} onDragEnd={endClientDrag}/>
-            <WorkloadSection title="Video editors" subtitle={`${data.settings.editor_daily_capacity} video concepts per working day · ${selectedMonthRecord?.working_days || 22} working days.`} people={workloads.editors} allocations={monthAllocations} type="editor" draggedRole={draggedRole} onDropClient={moveClient} onSelect={selectClientForMove} onDragStart={isLiveMonth ? startClientDrag : undefined} onDragEnd={endClientDrag}/>
-            <WorkloadSection title="Designers" subtitle={`${data.settings.designer_daily_capacity} static concepts per working day · two more concepts than editors.`} people={workloads.designers} allocations={monthAllocations} type="designer" draggedRole={draggedRole} onDropClient={moveClient} onSelect={selectClientForMove} onDragStart={isLiveMonth ? startClientDrag : undefined} onDragEnd={endClientDrag}/>
-            <WorkloadSection title="UGC managers" subtitle={`${data.settings.ugc_max_clients} active clients per UGC manager.`} people={workloads.ugcManagers} allocations={monthAllocations} type="ugc_manager" draggedRole={draggedRole} onDropClient={moveClient} onSelect={selectClientForMove} onDragStart={isLiveMonth ? startClientDrag : undefined} onDragEnd={endClientDrag}/>
+            {workloads.unmatchedKeys.length > 0 && <div className="planning-notice"><AlertTriangle size={15}/><span><strong>{workloads.unmatchedKeys.length} unmatched or unavailable assignment{workloads.unmatchedKeys.length === 1 ? '' : 's'}.</strong> Their shares are preserved but excluded from active-person cards. Review the client’s team before using capacity totals.</span></div>}
+            <WorkloadSection title="Creative strategists" subtitle={`Healthy range: ${data.settings.cs_min_concepts}–${data.settings.cs_max_concepts} concepts per month. Client count remains visible as context.`} people={workloads.strategists} allocations={monthAllocations} type="creative_strategist" draggedRole={draggedRole} onDropClient={moveClient} onSelect={selectClientForMove} onDragStart={isLiveMonth && !assignmentSaving ? startClientDrag : undefined} onDragEnd={endClientDrag} onManage={manageClientTeam} assignmentMode={assignmentMode}/>
+            <WorkloadSection title="Video editors" subtitle={`${data.settings.editor_daily_capacity} video concepts per working day · ${selectedMonthRecord?.working_days || 22} working days.`} people={workloads.editors} allocations={monthAllocations} type="editor" draggedRole={draggedRole} onDropClient={moveClient} onSelect={selectClientForMove} onDragStart={isLiveMonth && !assignmentSaving ? startClientDrag : undefined} onDragEnd={endClientDrag} onManage={manageClientTeam} assignmentMode={assignmentMode}/>
+            <WorkloadSection title="Designers" subtitle={`${data.settings.designer_daily_capacity} static concepts per working day · two more concepts than editors.`} people={workloads.designers} allocations={monthAllocations} type="designer" draggedRole={draggedRole} onDropClient={moveClient} onSelect={selectClientForMove} onDragStart={isLiveMonth && !assignmentSaving ? startClientDrag : undefined} onDragEnd={endClientDrag} onManage={manageClientTeam} assignmentMode={assignmentMode}/>
+            <WorkloadSection title="UGC managers" subtitle={`${data.settings.ugc_max_clients} full-client equivalents per UGC manager. A client shared by two managers counts as 0.5 each.`} people={workloads.ugcManagers} allocations={monthAllocations} type="ugc_manager" draggedRole={draggedRole} onDropClient={moveClient} onSelect={selectClientForMove} onDragStart={isLiveMonth && !assignmentSaving ? startClientDrag : undefined} onDragEnd={endClientDrag} onManage={manageClientTeam} assignmentMode={assignmentMode}/>
           </>
         )}
 
         {tab === 'allocations' && (
           <>
             {isLiveMonth
-              ? <div className="planning-roster-source"><CheckCircle2 size={15}/><span><strong>Client Roster is the source of truth.</strong> Close this month to freeze the exact allocation below as read-only, then continue live in the next month.</span></div>
+              ? <div className="planning-roster-source"><CheckCircle2 size={15}/><span><strong>Client Roster is the source of truth.</strong> Edit a client to select multiple people per role; workload splits equally. Close this month to freeze the allocation as read-only, then continue live in the next month.</span></div>
               : <div className="planning-history-source"><Copy size={15}/><span><strong>Read-only historical snapshot.</strong> This imported data is preserved and cannot overwrite today’s Client Roster.</span></div>}
             <AllocationTable allocations={monthAllocations} peopleByKey={peopleByKey} onEdit={item => setEditing(item)} isLive={isLiveMonth}/>
           </>
