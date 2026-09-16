@@ -4,36 +4,19 @@ import { supabase } from '../lib/supabase'
 import { getClientStrategistIds } from '../lib/clientAssignments'
 import { countsAsCompletedPlanReview, planWeekStart } from '../lib/planReview'
 import { isCompleteSpendEntry, lastCompletedSpendWeek } from '../lib/spendAnalytics'
+import { ACCOUNTABILITY_COLUMNS as COLUMNS, WEEKLY_UPDATE_OPTIONS, isMonthlyType, scoreLog, weeklyUpdateStatus, weeklyUpdatePatch } from '../lib/accountability'
 import { ChevronLeft, ChevronRight, Check, Minus } from 'lucide-react'
 import './Accountability.css'
 
 /* ── ITEMS ────────────────────────────────────────────────
-   Weekly update: explicit 3-state dropdown.
+   Weekly update: explicit status dropdown, including Not required.
    Weekly booleans: click to toggle.
    Client reports: 3-state (null | 'partial' | 'done'), cycle on click.
    Monthly survey: boolean, but only appears on the first week of each month.
    Slack participation: numeric 1–10.
    ──────────────────────────────────────────────────────── */
 
-const COLUMNS = [
-  { type: 'weekly-status', key: 'weekly_update_status', label: 'Weekly Update'         },
-  { type: 'bool',         key: 'monday_intentions',    label: 'Mon Intentions'         },
-  { type: 'bool',         key: 'friday_reflections',   label: 'Fri Reflections'        },
-  { type: 'bool',         key: 'mvp_votes',            label: 'MVP Votes'              },
-  { type: 'bool',         key: 'growth_tracker_logged', label: 'Growth Tracker'        },
-  { type: 'monthly-tri',  key: 'client_reports',       label: 'Monthly Client Report'  },
-  { type: 'monthly-bool', key: 'monthly_survey',       label: 'Monthly Survey'         },
-  { type: 'bool',         key: 'on_time_pod_calls',    label: 'Pod Attendance'         },
-  { type: 'bool',         key: 'on_time_client_calls', label: 'Client Attendance'      },
-]
-const isMonthlyType = (t) => t === 'monthly-bool' || t === 'monthly-tri'
-
 const SLACK_KEY = 'slack_participation'
-const WEEKLY_UPDATE_OPTIONS = [
-  { value: 'sent', label: 'Sent update' },
-  { value: 'partial', label: 'Partly sent' },
-  { value: 'not_sent', label: 'No update sent' },
-]
 const alphabeticalCollator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true })
 
 function memberRoleLabel(member) {
@@ -77,33 +60,6 @@ function weekNum(mondayStr) {
   return Math.ceil(((d - jan1) / 86400000 + jan1.getDay() + 1) / 7)
 }
 
-// ── SCORE HELPER ────────────────────────────────────────
-function scoreLog(log, monthlyVisible, spendStatus, hundredDayLogged) {
-  let earned = 0, total = 0
-  COLUMNS.forEach(c => {
-    if (isMonthlyType(c.type) && !monthlyVisible) return
-    total += 1
-    const v = log?.[c.key]
-    if (c.type === 'weekly-status') {
-      const status = v || (log?.weekly_update_sent ? 'sent' : 'not_sent')
-      if (status === 'sent') earned += 1
-      else if (status === 'partial') earned += 0.5
-    } else if (c.type === 'bool' || c.type === 'monthly-bool') {
-      if (v) earned += 1
-    } else if (c.type === 'monthly-tri') {
-      if (v === 'done') earned += 1
-      else if (v === 'partial') earned += 0.5
-    }
-  })
-  if (spendStatus?.total > 0) {
-    total += 1
-    if (spendStatus.complete) earned += 1
-  }
-  total += 1
-  if (hundredDayLogged) earned += 1
-  return { earned, total }
-}
-
 // ── ROW ──────────────────────────────────────────────────
 function MemberRow({ member, log, onChange, monthlyVisible, spendStatus, hundredDayLogged }) {
   const initials = (member.full_name || '?').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
@@ -131,14 +87,14 @@ function MemberRow({ member, log, onChange, monthlyVisible, spendStatus, hundred
 
       {COLUMNS.filter(c => !isMonthlyType(c.type) || monthlyVisible).map(c => {
         if (c.type === 'weekly-status') {
-          const status = log?.weekly_update_status || (log?.weekly_update_sent ? 'sent' : 'not_sent')
+          const status = weeklyUpdateStatus(log)
           return (
             <td key={c.key} style={{ textAlign: 'center' }}>
               <select
                 className={`accountability-update-select ${status}`}
                 value={status}
                 aria-label={`${member.full_name}: weekly update status`}
-                onChange={event => onChange(member.id, { [c.key]: event.target.value })}
+                onChange={event => onChange(member.id, weeklyUpdatePatch(event.target.value))}
               >
                 {WEEKLY_UPDATE_OPTIONS.map(option => (
                   <option value={option.value} key={option.value}>{option.label}</option>
@@ -264,6 +220,7 @@ export default function Accountability() {
   const [hundredDayPulses, setHundredDayPulses] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(null)
+  const [saveError, setSaveError] = useState('')
   // Default to the CURRENT week — team logs during the week, not after
   const [selectedWeek, setSelectedWeek] = useState(() => planWeekStart())
 
@@ -321,6 +278,7 @@ export default function Accountability() {
 
   async function handleChange(userId, patch) {
     setSaving(userId)
+    setSaveError('')
     const existing = logs[userId] || {}
     const next = { ...existing, ...patch, user_id: userId, week_start: selectedWeek, logged_by: profile?.id }
     setLogs(prev => ({ ...prev, [userId]: { ...prev[userId], ...patch } }))
@@ -333,6 +291,7 @@ export default function Accountability() {
       setLogs(prev => ({ ...prev, [userId]: data }))
     } else if (error) {
       console.error('Accountability save failed:', error.message)
+      setSaveError('Could not save the change. Please try again.')
       setLogs(prev => ({ ...prev, [userId]: existing }))
     }
     setSaving(null)
@@ -445,6 +404,7 @@ export default function Accountability() {
       </div>
 
       <div className="page-body">
+        {saveError && <p role="alert" className="text-red">{saveError}</p>}
         <div className="stat-row">
           <div className="stat-box"><div className="stat-box-label">Team</div><div className="stat-box-value">{stats.tot}</div></div>
           <div className="stat-box"><div className="stat-box-label">Fully Accountable</div><div className="stat-box-value text-green">{stats.fully}</div></div>
@@ -491,6 +451,7 @@ export default function Accountability() {
           marginTop: 14, display: 'flex', alignItems: 'center', gap: 22, flexWrap: 'wrap',
           fontSize: 11, color: 'var(--text-muted)',
         }}>
+          <span><b style={{ color: 'var(--text-primary)' }}>Weekly Update:</b> Not required excludes this item from the member’s score for the selected week.</span>
           <span><b style={{ color: 'var(--text-primary)' }}>Monthly Client Report:</b> click to cycle — <span style={{ color: 'var(--text-muted)' }}>—</span> not done, <span style={{ color: 'var(--amber)' }}>½</span> partial, <span style={{ color: 'var(--green)' }}>✓</span> done</span>
           <span>
             <b style={{ color: 'var(--text-primary)' }}>Spend Tracker:</b> Creative Strategists receive a check when every active assigned client has prior-week spend logged.
