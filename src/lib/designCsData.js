@@ -1,7 +1,5 @@
 import { supabase } from './supabase'
-import { DEFAULT_CAPACITY } from './workforcePlanning'
-
-const PLANNING_POSITIONS = new Set(['creative_strategist', 'designer', 'editor', 'ugc_manager'])
+import { DEFAULT_CAPACITY, syncPlanningPeople } from './workforcePlanning'
 
 export async function loadDesignCsData() {
   const [monthResult, allocationResult, peopleResult, clientResult, profileResult, settingsResult] = await Promise.all([
@@ -18,33 +16,7 @@ export async function loadDesignCsData() {
   if (firstError) throw firstError
 
   const profiles = profileResult.data || []
-  const profilesById = new Map(profiles.map(profile => [profile.id, profile]))
-  const people = (peopleResult.data || []).map(person => {
-    const profile = person.profile_id ? profilesById.get(person.profile_id) : null
-    if (!profile || !PLANNING_POSITIONS.has(profile.position)) return { ...person, is_active: false }
-    return {
-      ...person,
-      display_name: profile.full_name,
-      discipline: profile.position,
-      is_active: true,
-    }
-  })
-  const mappedProfileIds = new Set(people.filter(person => person.profile_id).map(person => person.profile_id))
-
-  profiles.filter(profile => PLANNING_POSITIONS.has(profile.position) && !mappedProfileIds.has(profile.id)).forEach(profile => {
-    people.push({
-      source_key: `profile:${profile.id}`,
-      profile_id: profile.id,
-      display_name: profile.full_name,
-      discipline: profile.position,
-      daily_capacity: profile.position === 'editor' ? DEFAULT_CAPACITY.editor_daily_capacity
-        : profile.position === 'designer' ? DEFAULT_CAPACITY.designer_daily_capacity : null,
-      max_clients: profile.position === 'ugc_manager' ? DEFAULT_CAPACITY.ugc_max_clients : null,
-      is_active: true,
-      source: 'company_command',
-      is_virtual: true,
-    })
-  })
+  const people = syncPlanningPeople(peopleResult.data || [], profiles)
 
   return {
     months: monthResult.data || [],

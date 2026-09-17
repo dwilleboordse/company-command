@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { guardClientFields } from '../lib/allocationAssignments'
+import { getRoleDiscipline } from '../lib/creativeStrategyRoles'
 import { formatCreatorTarget, packageFormValues, packagePayload, validateClientPackage } from '../lib/clientPackage'
 import ClientPackageFields from '../components/ClientPackageFields'
 import { Plus, Search, Archive, Edit2, LayoutGrid, LayoutList } from 'lucide-react'
@@ -201,7 +202,7 @@ function ClientModal({ client, allMembers, onClose, onSave }) {
     }
   }
 
-  const membersFor = (position) => allMembers.filter(m=>m.position===position)
+  const membersFor = (position) => allMembers.filter(m=>getRoleDiscipline(m.position)===position)
 
   return (
     <div className="modal-overlay" onClick={() => !saving && onClose()}>

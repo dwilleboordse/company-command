@@ -3,6 +3,7 @@ import { useLocation, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { today as todayStr } from '../lib/dates'
+import { getRoleDiscipline } from '../lib/creativeStrategyRoles'
 import { PLAN_REVIEW_EVENT, planReviewState, planToday, planWeekStart, validateWeeklyReview } from '../lib/planReview'
 import {
   Target, ListChecks, Route, ShieldAlert, CheckCircle2,
@@ -310,6 +311,7 @@ const CSS = `
 
 const POSITION_LABELS = {
   creative_strategist: 'Creative Strategy',
+  head_of_creative_strategy: 'Head of Creative Strategy',
   media_buyer:         'Paid Media',
   editor:              'Editing',
   designer:            'Design',
@@ -322,7 +324,7 @@ const POSITION_LABELS = {
   management:          'Management',
   company_wide:        'Company Wide',
 }
-const DEPTS = Array.from(new Set(Object.values(POSITION_LABELS)))
+const DEPTS = Array.from(new Set(Object.keys(POSITION_LABELS).map(position => POSITION_LABELS[getRoleDiscipline(position)])))
 
 const STEPS = [
   { label: "Setup", icon: Target },
@@ -617,7 +619,7 @@ export default function HundredDayPlan() {
       // Group OKRs by friendly department label
       const cfg = {}
       ;(objData || []).forEach(o => {
-        const dept = POSITION_LABELS[o.role_type] || o.role_type || 'Other'
+        const dept = POSITION_LABELS[getRoleDiscipline(o.role_type)] || o.role_type || 'Other'
         if (!cfg[dept]) cfg[dept] = []
         cfg[dept].push({
           id: o.id,
@@ -648,7 +650,7 @@ export default function HundredDayPlan() {
 
       setOkrCfg(cfg)
 
-      const defaultDept = POSITION_LABELS[profile.position] || ''
+      const defaultDept = POSITION_LABELS[getRoleDiscipline(profile.position)] || ''
 
       if (planData) {
         setPlanId(planData.id)

@@ -6,20 +6,22 @@ import { useAuth } from '../contexts/AuthContext'
 import { weekLabel } from '../lib/dates'
 import { fetchSpendData } from '../lib/spendData'
 import { hasBusinessDashboardAccess } from '../lib/dashboardAccess'
+import { isCreativeStrategist, isHeadOfCreativeStrategy } from '../lib/creativeStrategyRoles'
+import { canLogSpendClient } from '../lib/spendAnalytics'
 import { formatSpendMoney, isActiveSpendClient, isCompleteSpendEntry, lastCompletedSpendWeek, shiftSpendWeek, spendInPeriod, spendShare, spendStatus, spendTrend, summarizeSpend } from '../lib/spendAnalytics'
 import { SpendKpi } from './SpendAnalytics'
 import SpendLogModal from './SpendLogModal'
 import './spend.css'
 
 export default function SpendDashboard() {
-  const { profile } = useAuth()
-  const businessView = hasBusinessDashboardAccess(profile)
-  const visible = businessView || profile?.position === 'creative_strategist'
+  const { profile, isManagement, isOps } = useAuth()
+  const businessView = hasBusinessDashboardAccess(profile) || isHeadOfCreativeStrategy(profile)
+  const visible = businessView || isCreativeStrategist(profile)
   if (!visible) return null
-  return <SpendDashboardContent key={`${profile.id}:${businessView}`} profile={profile} businessView={businessView} />
+  return <SpendDashboardContent key={`${profile.id}:${businessView}`} profile={profile} businessView={businessView} canManage={isManagement || isOps} />
 }
 
-function SpendDashboardContent({ profile, businessView }) {
+function SpendDashboardContent({ profile, businessView, canManage }) {
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -82,12 +84,12 @@ function SpendDashboardContent({ profile, businessView }) {
         <div className="table-wrap"><table className="spend-table"><thead><tr><th>Client</th><th>DDU spend</th><th>Total spend</th><th>DDU share</th><th>Status / action</th></tr></thead><tbody>{displayedRows.map(({ client, entry }) => {
           const share = spendShare(entry)
           const complete = isCompleteSpendEntry(entry)
-          return <tr key={client.id}><td style={{ fontWeight: 600 }}>{client.name}</td><td className="spend-money">{formatSpendMoney(entry?.ddu_spend)}</td><td className="spend-money">{formatSpendMoney(entry?.total_spend)}</td><td className="spend-money">{share === null ? '—' : `${share.toFixed(1)}%`}</td><td><div className="spend-actions"><span className="spend-chip" style={{ color: !complete ? 'var(--text-muted)' : spendStatus(share).color, background: !complete ? 'var(--bg)' : spendStatus(share).bg }}>{!entry ? 'Not logged' : !complete ? 'Incomplete log' : Number(entry.total_spend) === 0 ? 'Zero spend' : spendStatus(share).label}</span><button className={`btn btn-sm ${complete ? 'btn-ghost' : 'btn-primary'}`} onClick={() => setLogClient(client)}>{entry ? complete ? 'Edit' : 'Complete log' : 'Log spend'}</button></div></td></tr>
+          return <tr key={client.id}><td style={{ fontWeight: 600 }}>{client.name}</td><td className="spend-money">{formatSpendMoney(entry?.ddu_spend)}</td><td className="spend-money">{formatSpendMoney(entry?.total_spend)}</td><td className="spend-money">{share === null ? '—' : `${share.toFixed(1)}%`}</td><td><div className="spend-actions"><span className="spend-chip" style={{ color: !complete ? 'var(--text-muted)' : spendStatus(share).color, background: !complete ? 'var(--bg)' : spendStatus(share).bg }}>{!entry ? 'Not logged' : !complete ? 'Incomplete log' : Number(entry.total_spend) === 0 ? 'Zero spend' : spendStatus(share).label}</span>{canLogSpendClient(client, profile, canManage) && <button className={`btn btn-sm ${complete ? 'btn-ghost' : 'btn-primary'}`} onClick={() => setLogClient(client)}>{entry ? complete ? 'Edit' : 'Complete log' : 'Log spend'}</button>}</div></td></tr>
         })}</tbody></table></div>
         {businessView && rows.length > 8 && <button className="btn btn-ghost btn-sm" style={{ marginTop: 10 }} onClick={() => setShowAllClients(value => !value)}>{showAllClients ? 'Show first 8 · missing and low share first' : `Show all ${rows.length} active clients`}</button>}
         <p className="spend-note">Active {businessView ? 'company' : 'assigned'} clients only. Totals reflect saved entries; coverage may differ from the previous week. DDU share measures creative adoption, not revenue or ROAS.</p>
       </>}
     </>}
-    {logClient && <SpendLogModal client={logClient} existing={weekEntries.find(row => row.client_id === logClient.id)} weekStart={week} onClose={() => setLogClient(null)} onSave={load} />}
+    {logClient && canLogSpendClient(logClient, profile, canManage) && <SpendLogModal client={logClient} existing={weekEntries.find(row => row.client_id === logClient.id)} weekStart={week} onClose={() => setLogClient(null)} onSave={load} />}
   </section>
 }

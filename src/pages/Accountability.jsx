@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { getClientStrategistIds } from '../lib/clientAssignments'
+import { isCreativeStrategist } from '../lib/creativeStrategyRoles'
 import { countsAsCompletedPlanReview, planWeekStart } from '../lib/planReview'
 import { isCompleteSpendEntry, lastCompletedSpendWeek } from '../lib/spendAnalytics'
 import { ACCOUNTABILITY_COLUMNS as COLUMNS, WEEKLY_UPDATE_OPTIONS, isMonthlyType, scoreLog, weeklyUpdateStatus, weeklyUpdatePatch } from '../lib/accountability'
@@ -148,7 +149,7 @@ function MemberRow({ member, log, onChange, monthlyVisible, spendStatus, hundred
       })}
 
       <td style={{ textAlign: 'center' }}>
-        {member.position !== 'creative_strategist' ? (
+        {!isCreativeStrategist(member) ? (
           <span style={{ color: 'var(--text-muted)' }}>—</span>
         ) : spendStatus?.total > 0 ? (
           <span
@@ -318,7 +319,7 @@ export default function Accountability() {
     const result = {}
 
     members.forEach(member => {
-      if (member.position !== 'creative_strategist') return
+      if (!isCreativeStrategist(member)) return
       const assignedClientIds = clients
         .filter(client => getClientStrategistIds(client).includes(member.id))
         .map(client => client.id)

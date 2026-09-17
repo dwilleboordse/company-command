@@ -1,11 +1,13 @@
 import { supabase } from './supabase'
 import { getMondayStr } from './dates'
+import { getRoleDiscipline } from './creativeStrategyRoles'
 
 // ── BADGE AWARD ENGINE ────────────────────────────────────────
 // Called on page load for the current user. Checks all conditions
 // and awards any badges not yet earned. Idempotent.
 
-export async function computeAndAwardBadges(userId, position) {
+export async function computeAndAwardBadges(userId, profilePosition) {
+  const position = getRoleDiscipline(profilePosition)
   // Load what they've already earned
   const { data: earned } = await supabase.from('user_badges').select('badge_id').eq('user_id', userId)
   const earnedSet = new Set(earned?.map(b => b.badge_id) || [])

@@ -5,6 +5,7 @@ import { Plus, Trash2, Edit2, Users, Lock } from 'lucide-react'
 
 const ROLE_LABELS = {
   marketing: 'Marketing', media_buyer: 'Media Buyer', creative_strategist: 'Creative Strategist',
+  head_of_creative_strategy: 'Head of Creative Strategy',
   editor: 'Editor', designer: 'Designer', ugc_manager: 'UGC Manager', email_marketer: 'Email Marketer',
   ops_manager: 'Operations Manager', ops_assistant: 'Operations Assistant', hr_manager: 'HR Manager',
   management: 'Management',

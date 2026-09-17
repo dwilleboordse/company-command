@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { getPeriodOptions, resolvePeriod } from '../lib/reportingPeriods'
 import { getClientStrategistIds, getClientStrategistNames } from '../lib/clientAssignments'
+import { isCreativeStrategist } from '../lib/creativeStrategyRoles'
 import { compareSpendClients, formatSpendMoney, isActiveSpendClient, spendClientOptionLabels, spendInPeriod, spendStatus, spendTrend, summarizeSpend } from '../lib/spendAnalytics'
 import './spend.css'
 
@@ -31,7 +32,7 @@ export default function SpendAnalytics({ clients, entries, members = [], canFilt
   const ranked = clientRows.filter(row => row.total !== null).slice(0, 10).map(row => ({ name: row.client.name, total: row.total, ddu: row.ddu }))
   const lowShare = clientRows.filter(row => row.share !== null && row.share < 20).length
   const unlogged = clientRows.filter(row => row.entries === 0).length
-  const visibleStrategists = members.filter(member => member.position === 'creative_strategist')
+  const visibleStrategists = members.filter(isCreativeStrategist)
 
   return <section className="spend-section" aria-label="Spend analytics">
     <div className="spend-controls">

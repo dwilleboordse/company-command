@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase'
 import { today, parseLocal } from '../lib/dates'
 import { formatSurveyMonth, previousSurveyMonth } from '../lib/monthlySurvey'
 import { formatOkrLabel } from '../lib/dashboardOkrs'
+import { isCreativeStrategist } from '../lib/creativeStrategyRoles'
 import DashboardOKRs from '../components/DashboardOKRs'
 import PlanDashboard from '../components/PlanDashboard'
 import SpendDashboard from '../components/SpendDashboard'
@@ -92,7 +93,7 @@ export default function Dashboard() {
         <QuickLinks/>
         <WeeklyHealthPrompt/>
         <PlanDashboard/>
-        {(isManagement || isOps || profile?.position === 'creative_strategist') && <SpendLeaderboard compact />}
+        {(isManagement || isOps || isCreativeStrategist(profile)) && <SpendLeaderboard compact />}
         <SpendDashboard/>
         <DashboardOKRs/>
       </div>

@@ -4,6 +4,8 @@ import { ChevronLeft, ChevronRight, Pause, Play } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { getClientStrategistIds, getClientStrategistNames } from '../lib/clientAssignments'
+import { isCreativeStrategist, isHeadOfCreativeStrategy } from '../lib/creativeStrategyRoles'
+import { canLogSpendClient } from '../lib/spendAnalytics'
 import { dateKey } from '../lib/reportingPeriods'
 import { fetchSpendData } from '../lib/spendData'
 import { formatSpendMoney, isActiveSpendClient, lastCompletedSpendWeek, shiftSpendWeek, spendInPeriod, spendNumber, spendShare, spendStatus, summarizeSpend, SPEND_PLATFORMS } from '../lib/spendAnalytics'
@@ -16,8 +18,11 @@ import '../components/spend.css'
 export default function SpendTracker() {
   const { profile, isManagement, isOps } = useAuth()
   const canManage = isManagement || isOps
-  // Keep existing page access; creative strategists have a focused roster-assigned view.
-  const companyView = canManage || profile?.position !== 'creative_strategist'
+  // Keep existing access; the CS head can review the whole team without
+  // receiving operations/management permissions.
+  const canFilterTeam = canManage || isHeadOfCreativeStrategy(profile)
+  const companyView = canFilterTeam || !isCreativeStrategist(profile)
+  const canLogClient = client => canLogSpendClient(client, profile, canManage)
   const [params, setParams] = useSearchParams()
   const view = ['weekly', 'monthly', 'analytics', 'leaderboard'].includes(params.get('tab')) ? params.get('tab') : 'weekly'
   const isLeaderboard = view === 'leaderboard'
@@ -86,11 +91,11 @@ export default function SpendTracker() {
     <div className="page-body">
       <div className="spend-tabs" role="tablist" aria-label="Spend Tracker views">{[['weekly', 'Weekly logging'], ['monthly', 'Monthly overview'], ['analytics', 'Analytics'], ['leaderboard', 'CS leaderboard']].map(([value, label]) => <button key={value} role="tab" aria-selected={view === value} onClick={() => setParams(value === 'weekly' ? {} : { tab: value })}>{label}</button>)}</div>
       {view !== 'leaderboard' && error && <div role="alert" className="spend-error">{error} <button className="btn btn-ghost btn-sm" onClick={load}>Retry</button></div>}
-      {view === 'leaderboard' ? <SpendLeaderboard /> : loading ? <div className="loading-screen" style={{ minHeight: 200, background: 'transparent' }}><div className="spinner" /></div> : error && !data.clients.length ? null : view === 'analytics' ? <SpendAnalytics clients={data.clients} entries={data.entries} members={data.members} canFilterTeam={canManage} /> : <>
+      {view === 'leaderboard' ? <SpendLeaderboard /> : loading ? <div className="loading-screen" style={{ minHeight: 200, background: 'transparent' }}><div className="spinner" /></div> : error && !data.clients.length ? null : view === 'analytics' ? <SpendAnalytics clients={data.clients} entries={data.entries} members={data.members} canFilterTeam={canFilterTeam} /> : <>
         <div className="spend-controls">
           {view === 'weekly' ? <div className="spend-actions"><button className="btn btn-ghost btn-sm" aria-label="Previous logging week" onClick={() => setWeek(shiftSpendWeek(week, -1))}><ChevronLeft size={16} /></button><div><strong>Week of {weekLabel(week)}</strong><div className="spend-kpi-detail">{week === lastCompletedSpendWeek() ? 'Target logging week' : week === currentWeek ? 'Current week · in progress' : 'Historical week'}</div></div><button className="btn btn-ghost btn-sm" aria-label="Next logging week" disabled={week >= currentWeek} onClick={() => setWeek(shiftSpendWeek(week, 1))}><ChevronRight size={16} /></button>{week !== lastCompletedSpendWeek() && <button className="btn btn-ghost btn-sm" onClick={() => setWeek(lastCompletedSpendWeek())}>Latest due week</button>}</div> : <label className="spend-field">Month<input type="month" value={month} max={dateKey(new Date()).slice(0, 7)} onChange={e => e.target.value && setMonth(e.target.value)} /></label>}
           <label className="spend-field">Search clients<input placeholder="Client name…" value={search} onChange={e => setSearch(e.target.value)} /></label>
-          {canManage && <label className="spend-field">Creative strategist<select value={strategist} onChange={e => setStrategist(e.target.value)}><option value="all">All strategists</option>{data.members.filter(member => member.position === 'creative_strategist').map(member => <option key={member.id} value={member.id}>{member.full_name}</option>)}</select></label>}
+          {canFilterTeam && <label className="spend-field">Creative strategist<select value={strategist} onChange={e => setStrategist(e.target.value)}><option value="all">All strategists</option>{data.members.filter(isCreativeStrategist).map(member => <option key={member.id} value={member.id}>{member.full_name}</option>)}</select></label>}
           <label className="spend-field">Status<select value={status} onChange={e => setStatus(e.target.value)}><option value="all">All statuses</option><option value="unlogged">Not logged / incomplete</option><option value="low">Low share · below 20%</option><option value="healthy">Healthy · 20–49.9%</option><option value="excellent">Excellent · 50%+</option></select></label>
         </div>
         <div className="spend-kpis"><SpendKpi label="Spend on DDU creatives" value={formatSpendMoney(summary.ddu)} /><SpendKpi label="Total client spend" value={formatSpendMoney(summary.total)} /><SpendKpi label="Weighted DDU share" value={summary.share === null ? '—' : `${summary.share.toFixed(1)}%`} detail="Total DDU spend ÷ total client spend" /><SpendKpi label={view === 'monthly' ? 'Clients with complete entries' : 'Clients logged'} value={`${summary.loggedClients} / ${baseClients.length}`} detail={`${summary.completeEntries} complete weekly entries · ${summary.incomplete} incomplete`} /></div>
@@ -98,15 +103,15 @@ export default function SpendTracker() {
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}><div className="table-wrap"><table className="spend-table"><thead><tr><th>Client / strategist</th><th>DDU spend</th><th>Total spend</th><th>DDU share</th><th>Status</th><th>Actions</th></tr></thead><tbody>{rows.map(row => <Fragment key={row.client.id}><tr>
           <td><button className="spend-client-link" aria-expanded={expanded === row.client.id} onClick={() => setExpanded(expanded === row.client.id ? null : row.client.id)}>{row.client.name}</button><div className="spend-kpi-detail">{getClientStrategistNames(row.client, data.members).join(', ') || 'No strategist assigned'}</div></td>
           <td className="spend-money">{formatSpendMoney(row.ddu)}</td><td className="spend-money">{formatSpendMoney(row.total)}</td><td className="spend-money">{row.share === null ? '—' : `${row.share.toFixed(1)}%`}</td><td><span className="spend-chip" style={{ color: row.incomplete ? 'var(--text-muted)' : spendStatus(row.share).color, background: row.incomplete ? 'var(--bg)' : spendStatus(row.share).bg }}>{!row.entries ? 'Not logged' : row.incomplete ? 'Incomplete log' : row.total === 0 ? 'Zero spend logged' : spendStatus(row.share).label}</span>{view === 'monthly' && <div className="spend-kpi-detail">{row.completeEntries} complete weeks{row.incomplete ? ` · ${row.incomplete} incomplete` : ''}</div>}</td>
-          <td><div className="spend-actions">{view === 'weekly' && <button className={`btn btn-sm ${row.entries ? 'btn-ghost' : 'btn-primary'}`} onClick={() => setLogging({ client: row.client, existing: row.periodEntries[0], weekStart: week })}>{row.entries ? 'Edit' : 'Log spend'}</button>}<button className="btn btn-ghost btn-sm" onClick={() => setExpanded(expanded === row.client.id ? null : row.client.id)}>History</button>{canManage && <button className="btn btn-ghost btn-sm" title={`Pause ${row.client.name}`} disabled={!!updating} onClick={() => pauseClient(row.client, true)}><Pause size={12} /></button>}</div></td>
-        </tr>{expanded === row.client.id && <tr><td colSpan={6} style={{ padding: 0 }}><SpendHistory client={row.client} entries={row.history} onLog={setLogging} /></td></tr>}</Fragment>)}{!rows.length && <tr><td colSpan={6} className="spend-empty">No clients match these filters.</td></tr>}</tbody></table></div></div>
+          <td><div className="spend-actions">{view === 'weekly' && canLogClient(row.client) && <button className={`btn btn-sm ${row.entries ? 'btn-ghost' : 'btn-primary'}`} onClick={() => setLogging({ client: row.client, existing: row.periodEntries[0], weekStart: week })}>{row.entries ? 'Edit' : 'Log spend'}</button>}<button className="btn btn-ghost btn-sm" onClick={() => setExpanded(expanded === row.client.id ? null : row.client.id)}>History</button>{canManage && <button className="btn btn-ghost btn-sm" title={`Pause ${row.client.name}`} disabled={!!updating} onClick={() => pauseClient(row.client, true)}><Pause size={12} /></button>}</div></td>
+        </tr>{expanded === row.client.id && <tr><td colSpan={6} style={{ padding: 0 }}><SpendHistory client={row.client} entries={row.history} onLog={canLogClient(row.client) ? setLogging : undefined} /></td></tr>}</Fragment>)}{!rows.length && <tr><td colSpan={6} className="spend-empty">No clients match these filters.</td></tr>}</tbody></table></div></div>
         {!!pausedClients.length && <details className="card spend-paused" style={{ padding: 0 }}><summary>Paused / past clients ({pausedClients.length})</summary><p className="spend-note" style={{ padding: '0 16px' }}>Hidden from active logging totals. History is preserved and included in Analytics when current + past clients are selected.</p><div className="table-wrap"><table className="spend-table"><thead><tr><th>Client</th><th>Last logged</th><th>Saved entries</th><th>Actions</th></tr></thead><tbody>{pausedClients.map(client => {
           const history = data.entries.filter(entry => entry.client_id === client.id)
           return <Fragment key={client.id}><tr><td>{client.name}<div className="spend-kpi-detail">{getClientStrategistNames(client, data.members).join(', ') || 'Unassigned'}</div></td><td>{history[0] ? weekLabel(history[0].week_start) : 'No entries'}</td><td>{history.length}</td><td><div className="spend-actions"><button className="btn btn-ghost btn-sm" onClick={() => setExpanded(expanded === client.id ? null : client.id)}>History</button>{canManage && <button className="btn btn-ghost btn-sm" disabled={!!updating} onClick={() => pauseClient(client, false)}><Play size={12} />{updating === client.id ? 'Updating…' : 'Unpause'}</button>}</div></td></tr>{expanded === client.id && <tr><td colSpan={4} style={{ padding: 0 }}><SpendHistory client={client} entries={history} /></td></tr>}</Fragment>
         })}</tbody></table></div></details>}
       </>}
     </div>
-    {logging && <SpendLogModal {...logging} onClose={() => setLogging(null)} onSave={load} />}
+    {logging && canLogClient(logging.client) && <SpendLogModal {...logging} onClose={() => setLogging(null)} onSave={load} />}
   </>
 }
 

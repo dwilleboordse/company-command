@@ -1,6 +1,7 @@
 import { buildTimeBuckets, dateKey, parseReportingDate } from './reportingPeriods.js'
 import { getClientStrategistIds } from './clientAssignments.js'
 import { planToday } from './planReview.js'
+import { isCreativeStrategist, isHeadOfCreativeStrategy } from './creativeStrategyRoles.js'
 
 export const SPEND_PLATFORMS = [
   { key: 'meta_spend', totalKey: 'meta_total_spend', label: 'Meta', color: '#1877f2' },
@@ -69,9 +70,17 @@ export function spendClientOptionLabels(clients) {
 }
 
 export function scopeSpendClients(clients, profile, canManage = false) {
-  if (canManage) return clients
-  return profile?.position === 'creative_strategist'
+  if (!profile?.id || profile.is_active === false) return []
+  if (canManage || isHeadOfCreativeStrategy(profile)) return clients
+  return isCreativeStrategist(profile)
     ? clients.filter(client => getClientStrategistIds(client).includes(profile.id)) : []
+}
+
+// Company-wide visibility for a CS head does not grant client-management or
+// other strategists' logging actions. Existing roles keep their current UI.
+export function canLogSpendClient(client, profile, canManage = false) {
+  if (!profile?.id || profile.is_active === false) return false
+  return canManage || !isHeadOfCreativeStrategy(profile) || getClientStrategistIds(client).includes(profile.id)
 }
 
 export function lastCompletedSpendWeek(today = new Date()) {

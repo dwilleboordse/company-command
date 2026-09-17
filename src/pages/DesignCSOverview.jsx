@@ -7,6 +7,7 @@ import { buildAllocationSnapshot, buildRosterAllocations, buildWorkloads, format
 import ClientPackageFields from '../components/ClientPackageFields'
 import { formatCreatorTarget, packageFormValues, packagePayload, validateClientPackage } from '../lib/clientPackage'
 import { guardClientFields, planAssignmentChange } from '../lib/allocationAssignments'
+import { isCreativeStrategist } from '../lib/creativeStrategyRoles'
 import './WorkforcePlanning.css'
 
 const WORKLOAD_DRAG_MIME = 'application/x-company-command-client'
@@ -478,7 +479,7 @@ function OrgChart({ profiles, clients }) {
   const sections = [
     { key: 'leadership', label: 'Leadership', people: profiles.filter(profile => profile.role === 'ceo' || (profile.role === 'management' && profile.position === 'management')) },
     { key: 'operations', label: 'Operations', people: profiles.filter(profile => ['ops_manager', 'ops_assistant'].includes(profile.position)) },
-    { key: 'strategy', label: 'Creative Strategy', people: profiles.filter(profile => profile.position === 'creative_strategist') },
+    { key: 'strategy', label: 'Creative Strategy', people: profiles.filter(isCreativeStrategist) },
     { key: 'growth', label: 'Growth', people: profiles.filter(profile => ['media_buyer', 'email_marketer'].includes(profile.position)) },
     { key: 'production', label: 'Production', people: profiles.filter(profile => ['editor', 'designer', 'ugc_manager'].includes(profile.position)) },
   ]

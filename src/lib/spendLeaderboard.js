@@ -1,4 +1,5 @@
 import { parseAssignmentIds } from './clientAssignments.js'
+import { isCreativeStrategist } from './creativeStrategyRoles.js'
 import { planToday } from './planReview.js'
 import { dateKey, parseReportingDate } from './reportingPeriods.js'
 import { isCompleteSpendEntry, lastCompletedSpendWeek, shiftSpendWeek } from './spendAnalytics.js'
@@ -51,7 +52,7 @@ export function buildSpendLeaderboard({ clients = [], entries = [], members = []
   const clientById = new Map(clients.filter(client => validId(client?.id)).map(client => [client.id, client]))
   const ownersByClient = new Map([...clientById.values()].map(client => [client.id, strategistIds(client)]))
   const rowById = new Map(members.filter(member => validId(member?.id)
-    && member.position === 'creative_strategist' && member.is_active !== false).map(member => [member.id, {
+    && isCreativeStrategist(member) && member.is_active !== false).map(member => [member.id, {
     id: member.id, name: member.full_name || 'Unnamed strategist', ddu: null, total: null, share: null,
     completeEntries: 0, reportedClients: 0, latestWeek: null, rank: null, clients: [],
   }]))

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
+import { getRoleDiscipline } from '../lib/creativeStrategyRoles'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer } from 'recharts'
 import { Plus, Edit2, Trash2, ChevronDown, ChevronUp } from 'lucide-react'
 import { getMondayStr } from '../lib/dates'
@@ -271,7 +272,7 @@ function KPIGroupCard({ kpi, members, allUserValues, onLog, onEdit, onDelete, is
   const weekStart = getMondayStr()
 
   // Relevant members: those whose position matches this kpi's role_type
-  const relevantMembers = members.filter(m => m.position === kpi.role_type || kpi.role_type === 'company_wide')
+  const relevantMembers = members.filter(m => [m.position, getRoleDiscipline(m.position)].includes(kpi.role_type) || kpi.role_type === 'company_wide')
 
   // For athlete view — just show their own
   const displayMembers = isManagement ? relevantMembers : relevantMembers.filter(m => m.id === currentUserId)
@@ -397,7 +398,7 @@ export default function KPIs() {
     if (!isCEO && !isManagement) q = q.eq('visibility', 'team')
     else if (!isCEO) q = q.in('visibility', ['team', 'management'])
     // Athlete: only see KPIs for their role
-    if (!isManagement && profile.position) q = q.eq('role_type', profile.position)
+    if (!isManagement && profile.position) q = q.in('role_type', [...new Set([profile.position, getRoleDiscipline(profile.position)])])
     if (dept !== 'all') q = q.eq('department', dept)
     const { data: kpiData } = await q
     setKpis(kpiData || [])

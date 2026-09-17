@@ -1,4 +1,5 @@
 import { getClientStrategistIds } from './clientAssignments.js'
+import { getRoleDiscipline } from './creativeStrategyRoles.js'
 
 export const PLANNING_ROLES = [
   { key: 'creative_strategist', label: 'Creative Strategists', singular: 'Creative Strategist', color: 'var(--green)' },
@@ -15,6 +16,38 @@ export const DEFAULT_CAPACITY = {
   editor_daily_capacity: 5,
   designer_daily_capacity: 7,
   ugc_max_clients: 8,
+}
+
+// A promotion changes a person's title, not their assignment keys or planning
+// discipline. Keep existing rows/capacity settings and materialize only newcomers.
+export function syncPlanningPeople(existingPeople = [], profiles = []) {
+  const planningRoles = new Set(PLANNING_ROLES.map(role => role.key))
+  const profilesById = new Map(profiles.filter(profile => profile.is_active !== false).map(profile => [profile.id, profile]))
+  const people = existingPeople.map(person => {
+    const profile = profilesById.get(person.profile_id)
+    const discipline = getRoleDiscipline(profile?.position)
+    if (!profile || !planningRoles.has(discipline)) return { ...person, is_active: false }
+    return { ...person, display_name: profile.full_name, discipline, is_active: true }
+  })
+  const mappedProfileIds = new Set(people.filter(person => person.profile_id).map(person => person.profile_id))
+
+  for (const profile of profilesById.values()) {
+    const discipline = getRoleDiscipline(profile.position)
+    if (!planningRoles.has(discipline) || mappedProfileIds.has(profile.id)) continue
+    people.push({
+      source_key: `profile:${profile.id}`,
+      profile_id: profile.id,
+      display_name: profile.full_name,
+      discipline,
+      daily_capacity: discipline === 'editor' ? DEFAULT_CAPACITY.editor_daily_capacity
+        : discipline === 'designer' ? DEFAULT_CAPACITY.designer_daily_capacity : null,
+      max_clients: discipline === 'ugc_manager' ? DEFAULT_CAPACITY.ugc_max_clients : null,
+      is_active: true,
+      source: 'company_command',
+      is_virtual: true,
+    })
+  }
+  return people
 }
 
 export function formatMonth(monthStart) {
@@ -417,6 +450,7 @@ export function roleLabel(position = '') {
     ops_manager: 'Operations Manager',
     ops_assistant: 'Operations Assistant',
     creative_strategist: 'Creative Strategist',
+    head_of_creative_strategy: 'Head of Creative Strategy',
     media_buyer: 'Media Buyer',
     editor: 'Video Editor',
     designer: 'Designer',

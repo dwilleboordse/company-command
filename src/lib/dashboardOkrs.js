@@ -1,3 +1,5 @@
+import { getRoleDiscipline } from './creativeStrategyRoles.js'
+
 const normalize = value => String(value || '').trim().toLowerCase()
 
 export function parseOkrAssignees(value) {
@@ -29,7 +31,8 @@ function companyObjective(objective) {
 }
 
 function matchesRole(objective, profile) {
-  return Boolean(profile.position) && normalize(objective.role_type) === normalize(profile.position)
+  return Boolean(profile.position) && [profile.position, getRoleDiscipline(profile.position)]
+    .some(position => normalize(objective.role_type) === normalize(position))
 }
 
 function assignedToMe(objective, kr, profile) {

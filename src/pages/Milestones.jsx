@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
+import { getRoleDiscipline } from '../lib/creativeStrategyRoles'
 import { ChevronDown, ChevronUp, Plus, Trash2, Edit2, Check, X } from 'lucide-react'
 
 const STATUS_OPTIONS=['not_started','started','half','three_quarters','completed']
@@ -138,11 +139,11 @@ export default function Milestones() {
   async function load() {
     if (!profile) return;setLoading(true)
     let q=supabase.from('milestones').select('*').eq('is_active',true).order('department').order('role_type').order('system_name')
-    if (!isManagement&&profile.position) q=q.eq('role_type',profile.position)
+    if (!isManagement&&profile.position) q=q.in('role_type',[...new Set([profile.position,getRoleDiscipline(profile.position)])])
     // Filter by team member position
     if (isManagement&&memberFilter!=='all') {
       const m=members.find(x=>x.id===memberFilter)
-      if (m?.position) q=q.eq('role_type',m.position)
+      if (m?.position) q=q.in('role_type',[...new Set([m.position,getRoleDiscipline(m.position)])])
     }
     if (deptFilter!=='all') q=q.eq('department',deptFilter)
     if (statusFilter==='open') q=q.neq('status','completed')

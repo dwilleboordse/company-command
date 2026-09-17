@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
 import { fetchAllRows } from './reportingData'
 import { scopeSpendClients } from './spendAnalytics'
+import { CREATIVE_STRATEGY_POSITIONS } from './creativeStrategyRoles'
 
 // Team-wide read model, separate from the strategist's own-client logging scope.
 // Existing authenticated RLS remains authoritative. Never fetch notes, emails,
@@ -11,7 +12,7 @@ export async function fetchSpendLeaderboardData() {
       .select('id,name,cs_ids,assigned_cs_id,is_active,is_archived').order('id')),
     fetchAllRows(() => supabase.from('profiles')
       .select('id,full_name,position,is_active').eq('is_active', true)
-      .eq('position', 'creative_strategist').order('id')),
+      .in('position', CREATIVE_STRATEGY_POSITIONS).order('id')),
     fetchAllRows(() => supabase.from('spend_entries')
       .select('id,client_id,week_start,ddu_spend,total_spend,created_at,updated_at')
       .order('week_start', { ascending: false }).order('id')),

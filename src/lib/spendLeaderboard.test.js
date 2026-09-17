@@ -9,6 +9,16 @@ const entry = (client_id, ddu_spend, total_spend, extra = {}) => ({
 })
 const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-9, `${actual} should equal ${expected}`)
 
+test('promotion to CS head preserves leaderboard attribution and does not inherit peer spend', () => {
+  const data = { period, members: [member('head'), member('other')], clients: [
+    { id: 'own', cs_ids: ['head'] }, { id: 'shared', cs_ids: ['head', 'other'] }, { id: 'peer', cs_ids: ['other'] },
+  ], entries: [entry('own', 100, 200), entry('shared', 100, 300), entry('peer', 900, 1000)] }
+  const before = buildSpendLeaderboard(data)
+  const promoted = buildSpendLeaderboard({ ...data, members: [member('head', 'head', { position: 'head_of_creative_strategy' }), member('other')] })
+  assert.deepEqual(promoted, before)
+  assert.equal(promoted.rows.find(row => row.id === 'head').ddu, 150)
+})
+
 test('leaderboard defaults to allocated DDU dollars and can rank weighted share instead', () => {
   const data = { period, members: [member('a'), member('b')], clients: [
     { id: 'small', cs_ids: ['a'] }, { id: 'large', cs_ids: ['a'] }, { id: 'other', cs_ids: ['b'] },

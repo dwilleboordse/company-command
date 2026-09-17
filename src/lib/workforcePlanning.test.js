@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildAllocationSnapshot, buildHiringSignals, buildRosterAllocations, buildWorkloads, DEFAULT_CAPACITY, nextMonthStart, parseIds, projectGrowthScenario } from './workforcePlanning.js'
+import { buildAllocationSnapshot, buildHiringSignals, buildRosterAllocations, buildWorkloads, DEFAULT_CAPACITY, nextMonthStart, parseIds, projectGrowthScenario, roleLabel, syncPlanningPeople } from './workforcePlanning.js'
 
 const people = [
   { source_key: 'cs-1', display_name: 'CS One', discipline: 'creative_strategist', is_active: true },
@@ -21,6 +21,50 @@ function allocations(count, concepts = 20) {
     ugc_manager_keys: [],
   }))
 }
+
+test('promoting a strategist preserves planning identity, capacity and client workloads', () => {
+  const existing = [{ ...people[0], profile_id: 'promoted-cs', daily_capacity: 4, max_clients: 5 }]
+  const before = structuredClone(existing)
+  const profiles = [{ id: 'promoted-cs', full_name: 'Team Lead', position: 'head_of_creative_strategy', is_active: true }]
+  const synced = syncPlanningPeople(existing, profiles)
+  assert.deepEqual(existing, before)
+  assert.equal(synced.length, 1)
+  assert.equal(synced[0].source_key, 'cs-1')
+  assert.equal(synced[0].discipline, 'creative_strategist')
+  assert.equal(synced[0].daily_capacity, 4)
+  assert.equal(synced[0].max_clients, 5)
+  assert.equal(synced[0].is_active, true)
+  assert.equal(synced[0].is_virtual, undefined)
+  const rosterRows = buildRosterAllocations({ people: synced, clients: [{
+    id: 'client', name: 'Example', cs_ids: ['promoted-cs'],
+    creatives: { video: { concepts: 16 }, static: { concepts: 4 } },
+  }] })
+  assert.deepEqual(rosterRows[0].strategist_keys, ['cs-1'])
+  const workload = buildWorkloads({ people: synced, allocations: rosterRows })
+  assert.equal(workload.strategists[0].concepts, 20)
+  assert.equal(workload.strategists[0].clients, 1)
+  assert.equal(roleLabel(profiles[0].position), 'Head of Creative Strategy')
+})
+
+test('a newly mapped head uses the existing strategist discipline, never a new capacity type', () => {
+  const profiles = [{ id: 'new-head', full_name: 'New Lead', position: 'head_of_creative_strategy', is_active: true }]
+  const [person] = syncPlanningPeople([], profiles)
+  assert.equal(person.source_key, 'profile:new-head')
+  assert.equal(person.discipline, 'creative_strategist')
+  assert.equal(person.is_virtual, true)
+  assert.equal(buildWorkloads({ people: [person] }).strategists.length, 1)
+})
+
+test('planning sync never reactivates offboarded heads or creates people for non-planning roles', () => {
+  const existing = [{ ...people[0], profile_id: 'inactive-head' }]
+  const profiles = [
+    { id: 'inactive-head', position: 'head_of_creative_strategy', is_active: false },
+    { id: 'ops', position: 'ops_manager', is_active: true },
+  ]
+  const synced = syncPlanningPeople(existing, profiles)
+  assert.equal(synced.length, 1)
+  assert.equal(synced[0].is_active, false)
+})
 
 test('creative strategist capacity uses concepts as the common capacity unit', () => {
   const healthy = buildWorkloads({ allocations: allocations(4), people, settings: DEFAULT_CAPACITY, workingDays: 22 })

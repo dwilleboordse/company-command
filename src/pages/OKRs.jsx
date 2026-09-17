@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
+import { getRoleDiscipline } from '../lib/creativeStrategyRoles'
 import { buildOkrCurrentValuePatch, okrCurrentValueInput } from '../lib/dashboardOkrs'
 import { Plus, Edit2, Trash2, ChevronDown, ChevronRight, BookOpen, Target, CheckCircle2, Circle, AlertCircle } from 'lucide-react'
 
@@ -626,7 +627,7 @@ export default function OKRs() {
     if (!isManagement) {
       filteredObjs=filteredObjs.filter(o=>{
         const ids=parseAssignees(o.assignee_ids)
-        return ids.length===0?(o.role_type===profile.position):ids.includes(profile.id)
+        return ids.length===0?([profile.position,getRoleDiscipline(profile.position)].includes(o.role_type)):ids.includes(profile.id)
       })
     }
     setObjectives(filteredObjs)
@@ -816,7 +817,7 @@ export default function OKRs() {
             // My Team: show user's team + company context
             const myTeamObjs = isManagement
               ? teamObjs
-              : teamObjs.filter(o=>o.role_type===userRole)
+              : teamObjs.filter(o=>[userRole,getRoleDiscipline(userRole)].includes(o.role_type))
             return (
               <>
                 {companyObjs.length>0&&(

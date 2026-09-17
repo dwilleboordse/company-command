@@ -17,6 +17,15 @@ test('personal OKRs use role fallback and explicit assignments but not company c
   assert.deepEqual(result.map(row => row.id), ['role', 'explicit'])
 })
 
+test('Head of Creative Strategy retains creative strategist OKRs without management visibility', () => {
+  const head = { ...profile, position: 'head_of_creative_strategy' }
+  assert.deepEqual(buildDashboardOkrs({ objectives, keyResults, profile: head }).map(row => row.id), ['role', 'explicit'])
+  const privateResults = [{ ...keyResults[0], visibility: 'management' }]
+  assert.deepEqual(buildDashboardOkrs({ objectives: [objectives[0]], keyResults: privateResults, profile: head }), [])
+  const assignedElsewhere = [{ ...objectives[0], assignee_ids: ['another-person'] }]
+  assert.deepEqual(buildDashboardOkrs({ objectives: assignedElsewhere, keyResults, profile: head }), [])
+})
+
 test('explicit KR assignment overrides objective role and objective assignment', () => {
   const rows = [
     { ...keyResults[0], assignee_ids: ['someone-else'] },
