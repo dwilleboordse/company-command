@@ -10,6 +10,7 @@ import { formatSpendMoney, isActiveSpendClient, lastCompletedSpendWeek, shiftSpe
 import { weekLabel } from '../lib/dates'
 import SpendAnalytics, { SpendKpi } from '../components/SpendAnalytics'
 import SpendLogModal from '../components/SpendLogModal'
+import SpendLeaderboard from '../components/SpendLeaderboard'
 import '../components/spend.css'
 
 export default function SpendTracker() {
@@ -18,7 +19,8 @@ export default function SpendTracker() {
   // Keep existing page access; creative strategists have a focused roster-assigned view.
   const companyView = canManage || profile?.position !== 'creative_strategist'
   const [params, setParams] = useSearchParams()
-  const view = ['weekly', 'monthly', 'analytics'].includes(params.get('tab')) ? params.get('tab') : 'weekly'
+  const view = ['weekly', 'monthly', 'analytics', 'leaderboard'].includes(params.get('tab')) ? params.get('tab') : 'weekly'
+  const isLeaderboard = view === 'leaderboard'
   const [data, setData] = useState({ clients: [], members: [], entries: [] })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -38,12 +40,13 @@ export default function SpendTracker() {
     finally { setLoading(false) }
   }, [profile, companyView])
   useEffect(() => {
+    if (isLeaderboard) return
     let cancelled = false
     fetchSpendData(profile, companyView).then(next => { if (!cancelled) { setData(next); setError('') } })
       .catch(loadError => { if (!cancelled) setError(loadError.message) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [profile, companyView])
+  }, [profile, companyView, isLeaderboard])
 
   async function pauseClient(client, paused) {
     if (!canManage || updating) return
@@ -81,9 +84,9 @@ export default function SpendTracker() {
   return <>
     <div className="page-header"><h1 className="page-title">Spend Tracker</h1><p className="page-subtitle">Log every Monday for the prior week · track adoption of DDU creatives</p></div>
     <div className="page-body">
-      <div className="spend-tabs" role="tablist" aria-label="Spend Tracker views">{[['weekly', 'Weekly logging'], ['monthly', 'Monthly overview'], ['analytics', 'Analytics']].map(([value, label]) => <button key={value} role="tab" aria-selected={view === value} onClick={() => setParams(value === 'weekly' ? {} : { tab: value })}>{label}</button>)}</div>
-      {error && <div role="alert" className="spend-error">{error} <button className="btn btn-ghost btn-sm" onClick={load}>Retry</button></div>}
-      {loading ? <div className="loading-screen" style={{ minHeight: 200, background: 'transparent' }}><div className="spinner" /></div> : error && !data.clients.length ? null : view === 'analytics' ? <SpendAnalytics clients={data.clients} entries={data.entries} members={data.members} canFilterTeam={canManage} /> : <>
+      <div className="spend-tabs" role="tablist" aria-label="Spend Tracker views">{[['weekly', 'Weekly logging'], ['monthly', 'Monthly overview'], ['analytics', 'Analytics'], ['leaderboard', 'CS leaderboard']].map(([value, label]) => <button key={value} role="tab" aria-selected={view === value} onClick={() => setParams(value === 'weekly' ? {} : { tab: value })}>{label}</button>)}</div>
+      {view !== 'leaderboard' && error && <div role="alert" className="spend-error">{error} <button className="btn btn-ghost btn-sm" onClick={load}>Retry</button></div>}
+      {view === 'leaderboard' ? <SpendLeaderboard /> : loading ? <div className="loading-screen" style={{ minHeight: 200, background: 'transparent' }}><div className="spinner" /></div> : error && !data.clients.length ? null : view === 'analytics' ? <SpendAnalytics clients={data.clients} entries={data.entries} members={data.members} canFilterTeam={canManage} /> : <>
         <div className="spend-controls">
           {view === 'weekly' ? <div className="spend-actions"><button className="btn btn-ghost btn-sm" aria-label="Previous logging week" onClick={() => setWeek(shiftSpendWeek(week, -1))}><ChevronLeft size={16} /></button><div><strong>Week of {weekLabel(week)}</strong><div className="spend-kpi-detail">{week === lastCompletedSpendWeek() ? 'Target logging week' : week === currentWeek ? 'Current week · in progress' : 'Historical week'}</div></div><button className="btn btn-ghost btn-sm" aria-label="Next logging week" disabled={week >= currentWeek} onClick={() => setWeek(shiftSpendWeek(week, 1))}><ChevronRight size={16} /></button>{week !== lastCompletedSpendWeek() && <button className="btn btn-ghost btn-sm" onClick={() => setWeek(lastCompletedSpendWeek())}>Latest due week</button>}</div> : <label className="spend-field">Month<input type="month" value={month} max={dateKey(new Date()).slice(0, 7)} onChange={e => e.target.value && setMonth(e.target.value)} /></label>}
           <label className="spend-field">Search clients<input placeholder="Client name…" value={search} onChange={e => setSearch(e.target.value)} /></label>

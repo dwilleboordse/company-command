@@ -9,6 +9,7 @@ import { formatOkrLabel } from '../lib/dashboardOkrs'
 import DashboardOKRs from '../components/DashboardOKRs'
 import PlanDashboard from '../components/PlanDashboard'
 import SpendDashboard from '../components/SpendDashboard'
+import SpendLeaderboard from '../components/SpendLeaderboard'
 import WeeklyHealthPrompt from '../components/WeeklyHealthPrompt'
 import './Dashboard.css'
 
@@ -53,7 +54,7 @@ function QuickLinks() {
 }
 
 export default function Dashboard() {
-  const { profile } = useAuth()
+  const { profile, isManagement, isOps } = useAuth()
   const [surveyState, setSurveyState] = useState({ loading: true, submission: null, error: false })
   const surveyMonth = previousSurveyMonth()
 
@@ -91,6 +92,7 @@ export default function Dashboard() {
         <QuickLinks/>
         <WeeklyHealthPrompt/>
         <PlanDashboard/>
+        {(isManagement || isOps || profile?.position === 'creative_strategist') && <SpendLeaderboard compact />}
         <SpendDashboard/>
         <DashboardOKRs/>
       </div>
