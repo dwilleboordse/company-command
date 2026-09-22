@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useTheme } from '../contexts/ThemeContext'
 import HundredDayPlanReminder from './HundredDayPlanReminder'
+import { canUseCreativeLeadership } from '../lib/creativeLeadership'
 import { LayoutDashboard, Target, LogOut, Settings, TrendingUp, TrendingDown, Users, DollarSign, Menu, X, FileText, Trophy, Heart, UserCheck, Sun, Moon, ClipboardList, BarChart3, Compass, ShieldCheck, Network, BriefcaseBusiness } from 'lucide-react'
 
 export default function Layout() {
@@ -50,6 +51,7 @@ export default function Layout() {
 
           <p className="nav-section-label">Tracking</p>
           <NavLink to="/spend" className={nl}><DollarSign size={16}/> Spend Tracker</NavLink>
+          {canUseCreativeLeadership(profile) && <NavLink to="/creative-leadership" className={nl}><ClipboardList size={16}/> Creative Leadership</NavLink>}
           <NavLink to="/changelog" className={nl}><FileText size={16}/> Change Log</NavLink>
           <NavLink to="/rewards" className={nl}><Trophy size={16}/> Rewards</NavLink>
           {(isManagement || isOps) && (

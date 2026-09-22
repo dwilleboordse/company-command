@@ -1,0 +1,27 @@
+.creative-lead-home { padding: 20px; }
+.creative-lead-home h2 { display: flex; align-items: center; gap: 8px; font-size: 17px; margin: 0; }
+.creative-lead-home p { color: var(--text-secondary); margin: 10px 0 0; line-height: 1.55; font-size: 13px; }
+.creative-lead-home a:not(.btn) { color: var(--accent); }
+.creative-lead-home-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.creative-lead-home-heading > a { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.creative-lead-home-summary { display: flex; align-items: flex-start; gap: 12px; margin-top: 18px; }
+.creative-lead-home-summary > svg { flex: 0 0 auto; margin-top: 2px; color: var(--accent); }
+.creative-lead-home-summary > div { flex: 1; }
+.creative-lead-home-summary strong { font-size: 14px; }
+.creative-lead-home-summary p { margin-top: 5px; }
+.creative-lead-home.needs-changes { border-color: var(--amber); }
+.creative-lead-home.needs-changes .creative-lead-home-summary > svg { color: var(--amber); }
+.creative-lead-home-error { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.creative-lead-home-error > p { flex: 1; }
+.creative-lead-feedback-list { list-style: none; padding: 0; margin: 12px 0 0; }
+.creative-lead-feedback-list li { border-top: 1px solid var(--border); padding: 12px 0; }
+.creative-lead-feedback-list time { color: var(--text-muted); font-size: 11px; }
+.creative-lead-feedback-list p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.creative-lead-prompt-dialog { width: min(540px, calc(100vw - 32px)); }
+.creative-lead-prompt-dialog h2 { margin: 12px 0; }
+.creative-lead-prompt-dialog p { line-height: 1.6; }
+.creative-lead-prompt-eyebrow { font-size: 12px; color: var(--accent); margin-top: 16px; }
+.creative-lead-prompt-muted { color: var(--text-muted); font-size: 13px; }
+.creative-lead-prompt-actions { display: flex; gap: 12px; margin-top: 22px; flex-wrap: wrap; }
+body.creative-lead-modal-open { overflow: hidden; }
+@media (max-width: 600px) { .creative-lead-home-summary { flex-wrap: wrap; } .creative-lead-home-summary > div { flex-basis: calc(100% - 32px); } .creative-lead-home-summary > .btn { margin-left: 30px; } }

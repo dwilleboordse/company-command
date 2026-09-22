@@ -20,19 +20,22 @@ import Analytics from './pages/Analytics'
 import HundredDayPlan from './pages/HundredDayPlan'
 import Accountability from './pages/Accountability'
 import ChurnAnalysis from './pages/ChurnAnalysis'
+import { canUseCreativeLeadership } from './lib/creativeLeadership'
 
 const DesignCSOverview = lazy(() => import('./pages/DesignCSOverview'))
 const HiringRoadmap = lazy(() => import('./pages/HiringRoadmap'))
 const MonthlySurvey = lazy(() => import('./pages/MonthlySurvey'))
+const CreativeLeadership = lazy(() => import('./pages/CreativeLeadership'))
 
 function LoadingPage({ children }) {
   return <Suspense fallback={<div className="loading-screen"><div className="spinner"/></div>}>{children}</Suspense>
 }
 
-function PR({ children, ceo=false, mgmt=false, ops=false, ceoOps=false }) {
+function PR({ children, ceo=false, mgmt=false, ops=false, ceoOps=false, creativeLeadership=false }) {
   const { user, profile, loading, isOps } = useAuth()
   if (loading) return <div className="loading-screen"><div className="spinner"/></div>
   if (!user) return <Navigate to="/login" replace/>
+  if (creativeLeadership && !canUseCreativeLeadership(profile)) return <Navigate to="/" replace/>
   if (ceo && profile?.role!=='ceo') return <Navigate to="/" replace/>
   if (ceoOps && profile?.role !== 'ceo' && !isOps) return <Navigate to="/" replace/>
   if (mgmt && !['ceo','management'].includes(profile?.role) && !(ops && isOps)) return <Navigate to="/" replace/>
@@ -53,6 +56,7 @@ function AppRoutes() {
         <Route path="calendar" element={<Calendar/>}/>
         <Route path="meetings" element={<Meetings/>}/>
         <Route path="spend" element={<SpendTracker/>}/>
+        <Route path="creative-leadership" element={<PR creativeLeadership><LoadingPage><CreativeLeadership/></LoadingPage></PR>}/>
         <Route path="changelog" element={<ChangeLog/>}/>
         <Route path="rewards" element={<Rewards/>}/>
         <Route path="accountability" element={<PR mgmt ops><Accountability/></PR>}/>

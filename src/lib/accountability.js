@@ -1,3 +1,5 @@
+import { CREATIVE_LEAD_FIRST_WEEK, isCreativeLead, shiftCreativeLeadWeek } from './creativeLeadership.js'
+
 export const ACCOUNTABILITY_COLUMNS = [
   { type: 'weekly-status', key: 'weekly_update_status', label: 'Weekly Update' },
   { type: 'bool', key: 'monday_intentions', label: 'Mon Intentions' },
@@ -28,7 +30,24 @@ export function weeklyUpdatePatch(status) {
   return { weekly_update_status: status, weekly_update_sent: status === 'sent' }
 }
 
-export function scoreLog(log, monthlyVisible, spendStatus, hundredDayLogged) {
+// Accountability for week W covers the Lead CS review of the completed week W-1.
+export function leadReviewWeekForAccountability(weekStart) {
+  return shiftCreativeLeadWeek(weekStart, -1)
+}
+
+export function leadReviewAccountabilityStatus(member, reviews, accountabilityWeek, error = false) {
+  if (!isCreativeLead(member)) return { applicable: false, complete: false }
+  const weekStart = leadReviewWeekForAccountability(accountabilityWeek)
+  if (weekStart < CREATIVE_LEAD_FIRST_WEEK) return { applicable: false, complete: false }
+  if (error) return { applicable: true, complete: false, unavailable: true, weekStart, label: 'Status unavailable' }
+  const review = (reviews || []).find(item => item.lead_id === member.id && item.week_start === weekStart)
+  const complete = ['submitted', 'finalized'].includes(review?.status)
+  const label = review?.status === 'finalized' ? 'Finalized' : review?.status === 'submitted' ? 'Submitted'
+    : review?.status === 'changes_requested' ? 'Changes requested' : review?.status === 'draft' ? 'Draft' : 'Not submitted'
+  return { applicable: true, complete, status: review?.status || 'missing', weekStart, label }
+}
+
+export function scoreLog(log, monthlyVisible, spendStatus, hundredDayLogged, leadReviewStatus = null) {
   let earned = 0, total = 0
   ACCOUNTABILITY_COLUMNS.forEach(column => {
     if (isMonthlyType(column.type) && !monthlyVisible) return
@@ -53,5 +72,9 @@ export function scoreLog(log, monthlyVisible, spendStatus, hundredDayLogged) {
   }
   total += 1
   if (hundredDayLogged) earned += 1
+  if (leadReviewStatus?.applicable && !leadReviewStatus.unavailable) {
+    total += 1
+    if (leadReviewStatus.complete) earned += 1
+  }
   return { earned, total }
 }

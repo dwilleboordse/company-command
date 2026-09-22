@@ -12,6 +12,7 @@ import PlanDashboard from '../components/PlanDashboard'
 import SpendDashboard from '../components/SpendDashboard'
 import SpendLeaderboard from '../components/SpendLeaderboard'
 import WeeklyHealthPrompt from '../components/WeeklyHealthPrompt'
+import CreativeLeadershipPrompt from '../components/CreativeLeadershipPrompt'
 import './Dashboard.css'
 
 function getGreeting() {
@@ -92,6 +93,7 @@ export default function Dashboard() {
         {surveyState.error && <div className="home-survey-unavailable">Survey status unavailable. <Link to="/monthly-survey">Open Monthly Survey</Link></div>}
         <QuickLinks/>
         <WeeklyHealthPrompt/>
+        <CreativeLeadershipPrompt/>
         <PlanDashboard/>
         {(isManagement || isOps || isCreativeStrategist(profile)) && <SpendLeaderboard compact />}
         <SpendDashboard/>

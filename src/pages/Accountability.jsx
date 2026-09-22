@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { getClientStrategistIds } from '../lib/clientAssignments'
 import { isCreativeStrategist } from '../lib/creativeStrategyRoles'
 import { countsAsCompletedPlanReview, planWeekStart } from '../lib/planReview'
 import { isCompleteSpendEntry, lastCompletedSpendWeek } from '../lib/spendAnalytics'
-import { ACCOUNTABILITY_COLUMNS as COLUMNS, WEEKLY_UPDATE_OPTIONS, isMonthlyType, scoreLog, weeklyUpdateStatus, weeklyUpdatePatch } from '../lib/accountability'
+import { ACCOUNTABILITY_COLUMNS as COLUMNS, WEEKLY_UPDATE_OPTIONS, isMonthlyType, leadReviewAccountabilityStatus, leadReviewWeekForAccountability, scoreLog, weeklyUpdateStatus, weeklyUpdatePatch } from '../lib/accountability'
+import { canUseCreativeLeadership } from '../lib/creativeLeadership'
 import { ChevronLeft, ChevronRight, Check, Minus } from 'lucide-react'
 import './Accountability.css'
 
@@ -62,9 +64,9 @@ function weekNum(mondayStr) {
 }
 
 // ── ROW ──────────────────────────────────────────────────
-function MemberRow({ member, log, onChange, monthlyVisible, spendStatus, hundredDayLogged }) {
+function MemberRow({ member, log, onChange, monthlyVisible, spendStatus, hundredDayLogged, leadReviewStatus, canOpenLeadReview }) {
   const initials = (member.full_name || '?').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
-  const { earned, total } = scoreLog(log, monthlyVisible, spendStatus, hundredDayLogged)
+  const { earned, total } = scoreLog(log, monthlyVisible, spendStatus, hundredDayLogged, leadReviewStatus)
   const slack = log?.[SLACK_KEY] ?? null
 
   return (
@@ -185,6 +187,17 @@ function MemberRow({ member, log, onChange, monthlyVisible, spendStatus, hundred
       </td>
 
       <td style={{ textAlign: 'center' }}>
+        {!leadReviewStatus?.applicable ? <span title="Not required for this role or week" className="text-muted">—</span> : (
+          <span style={{ display: 'inline-flex', alignItems: 'center', flexDirection: 'column', gap: 5, minWidth: 105 }}>
+            <span className={`accountability-derived-check ${leadReviewStatus.complete ? 'complete' : ''}`} title={`${leadReviewStatus.label} · review week of ${leadReviewStatus.weekStart} · submission only, not a performance score`}>
+              {leadReviewStatus.unavailable ? '?' : leadReviewStatus.complete ? <Check size={15} strokeWidth={3}/> : <Minus size={13}/>}
+            </span>
+            {canOpenLeadReview ? <Link style={{ fontSize: 10 }} to={`/creative-leadership?week=${leadReviewStatus.weekStart}&lead=${member.id}`}>{leadReviewStatus.label}</Link> : <span style={{ fontSize: 10 }}>{leadReviewStatus.label}</span>}
+          </span>
+        )}
+      </td>
+
+      <td style={{ textAlign: 'center' }}>
         <select
           value={slack ?? ''}
           onChange={e => onChange(member.id, { [SLACK_KEY]: e.target.value === '' ? null : Number(e.target.value) })}
@@ -202,7 +215,7 @@ function MemberRow({ member, log, onChange, monthlyVisible, spendStatus, hundred
             ? 'var(--green)'
             : earned >= total * 0.7 ? 'var(--amber)' : 'var(--text-muted)',
         }}>
-          {earned % 1 === 0 ? earned : earned.toFixed(1)}/{total}
+          {leadReviewStatus?.unavailable ? <span title="Score unavailable while Lead CS review status cannot be checked">Unavailable</span> : <>{earned % 1 === 0 ? earned : earned.toFixed(1)}/{total}</>}
         </span>
       </td>
     </tr>
@@ -219,6 +232,8 @@ export default function Accountability() {
   const [clients, setClients] = useState([])
   const [spendEntries, setSpendEntries] = useState([])
   const [hundredDayPulses, setHundredDayPulses] = useState([])
+  const [leadReviews, setLeadReviews] = useState([])
+  const [leadReviewError, setLeadReviewError] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(null)
   const [saveError, setSaveError] = useState('')
@@ -234,7 +249,7 @@ export default function Accountability() {
     async function loadAccountability() {
       setLoading(true)
       const spendWeek = toDateStr(addWeeks(parseISODate(selectedWeek), -1))
-      const [memberResult, logResult, clientResult, spendResult, weeklyPulseResult, cyclePulseResult] = await Promise.all([
+      const [memberResult, logResult, clientResult, spendResult, weeklyPulseResult, cyclePulseResult, leadReviewResult] = await Promise.all([
         supabase.from('profiles').select('id,full_name,position,role,is_active').eq('is_active', true).order('full_name'),
         supabase.from('accountability_logs').select('*').eq('week_start', selectedWeek),
         supabase.from('clients')
@@ -250,6 +265,9 @@ export default function Accountability() {
         supabase.from('hundred_day_plan_cycle_pulses')
           .select('user_id,week_start,submitted_at')
           .eq('week_start', selectedWeek),
+        supabase.from('creative_lead_review_completions')
+          .select('lead_id,week_start,status,submitted_at,finalized_at')
+          .eq('week_start', leadReviewWeekForAccountability(selectedWeek)),
       ])
       if (cancelled) return
 
@@ -262,12 +280,14 @@ export default function Accountability() {
       setLogs(map)
       setClients((clientResult.data || []).filter(client => client.is_active === true && client.is_archived !== true))
       setSpendEntries(spendResult.data || [])
+      setLeadReviews(leadReviewResult.data || [])
+      setLeadReviewError(Boolean(leadReviewResult.error))
       // Preserve legacy completion history; new weekly reviews count only once finalized.
       setHundredDayPulses([
         ...(weeklyPulseResult.data || []).filter(countsAsCompletedPlanReview),
         ...(cyclePulseResult.data || []),
       ])
-      ;[memberResult, logResult, clientResult, spendResult, weeklyPulseResult, cyclePulseResult].forEach(result => {
+      ;[memberResult, logResult, clientResult, spendResult, weeklyPulseResult, cyclePulseResult, leadReviewResult].forEach(result => {
         if (result.error) console.error('Accountability load failed:', result.error.message)
       })
       setLoading(false)
@@ -340,6 +360,12 @@ export default function Accountability() {
     [hundredDayPulses],
   )
 
+  const leadReviewStatusByMember = useMemo(
+    () => Object.fromEntries(members.map(member => [member.id, leadReviewAccountabilityStatus(member, leadReviews, selectedWeek, leadReviewError)])),
+    [members, leadReviews, selectedWeek, leadReviewError],
+  )
+  const leadScoreUnavailable = Object.values(leadReviewStatusByMember).some(status => status.unavailable)
+
   const stats = useMemo(() => {
     const tot = members.length
     let fully = 0, missingAny = 0, totItems = 0, doneItems = 0
@@ -349,6 +375,7 @@ export default function Accountability() {
         monthlyVisible,
         spendStatusByMember[m.id],
         hundredDayLoggedByMember.has(m.id),
+        leadReviewStatusByMember[m.id],
       )
       totItems += total
       doneItems += earned
@@ -357,7 +384,7 @@ export default function Accountability() {
     })
     const completion = totItems > 0 ? Math.round((doneItems / totItems) * 100) : 0
     return { tot, fully, missingAny, completion }
-  }, [members, logs, monthlyVisible, spendStatusByMember, hundredDayLoggedByMember])
+  }, [members, logs, monthlyVisible, spendStatusByMember, hundredDayLoggedByMember, leadReviewStatusByMember])
 
   if (!canEdit) {
     return (
@@ -406,11 +433,12 @@ export default function Accountability() {
 
       <div className="page-body">
         {saveError && <p role="alert" className="text-red">{saveError}</p>}
+        {leadScoreUnavailable && <p role="alert" className="text-amber">Lead CS review status could not be loaded. The affected score and team completion totals are unavailable, not marked missing. Refresh to retry.</p>}
         <div className="stat-row">
           <div className="stat-box"><div className="stat-box-label">Team</div><div className="stat-box-value">{stats.tot}</div></div>
-          <div className="stat-box"><div className="stat-box-label">Fully Accountable</div><div className="stat-box-value text-green">{stats.fully}</div></div>
-          <div className="stat-box"><div className="stat-box-label">Missing Items</div><div className="stat-box-value text-amber">{stats.missingAny}</div></div>
-          <div className="stat-box"><div className="stat-box-label">Week Completion</div><div className="stat-box-value text-accent">{stats.completion}%</div></div>
+          <div className="stat-box"><div className="stat-box-label">Fully Accountable</div><div className="stat-box-value text-green">{leadScoreUnavailable ? '—' : stats.fully}</div></div>
+          <div className="stat-box"><div className="stat-box-label">Missing Items</div><div className="stat-box-value text-amber">{leadScoreUnavailable ? '—' : stats.missingAny}</div></div>
+          <div className="stat-box"><div className="stat-box-label">Week Completion</div><div className="stat-box-value text-accent">{leadScoreUnavailable ? '—' : `${stats.completion}%`}</div></div>
         </div>
 
         <div className="table-wrap accountability-table-wrap">
@@ -421,17 +449,18 @@ export default function Accountability() {
                 {visibleColumns.map(c => <th key={c.key} style={{ textAlign: 'center', fontSize: 10 }}>{c.label}</th>)}
                 <th style={{ textAlign: 'center', fontSize: 10 }}>Spend Tracker</th>
                 <th style={{ textAlign: 'center', fontSize: 10 }}>100-Day Plan Logged</th>
+                <th style={{ textAlign: 'center', fontSize: 10 }}>Lead CS Review Submitted</th>
                 <th style={{ textAlign: 'center' }}>Slack Participation 1–10</th>
                 <th style={{ textAlign: 'right' }}>Score</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={visibleColumns.length + 5} style={{ textAlign: 'center', padding: 32 }}>
+                <tr><td colSpan={visibleColumns.length + 6} style={{ textAlign: 'center', padding: 32 }}>
                   <div className="spinner" style={{ display: 'inline-block' }} />
                 </td></tr>
               ) : members.length === 0 ? (
-                <tr><td colSpan={visibleColumns.length + 5}><div className="empty-state"><p>No team members found.</p></div></td></tr>
+                <tr><td colSpan={visibleColumns.length + 6}><div className="empty-state"><p>No team members found.</p></div></td></tr>
               ) : members.map(m => (
                 <MemberRow
                   key={m.id}
@@ -441,6 +470,8 @@ export default function Accountability() {
                   monthlyVisible={monthlyVisible}
                   spendStatus={spendStatusByMember[m.id]}
                   hundredDayLogged={hundredDayLoggedByMember.has(m.id)}
+                  leadReviewStatus={leadReviewStatusByMember[m.id]}
+                  canOpenLeadReview={canUseCreativeLeadership(profile)}
                 />
               ))}
             </tbody>
@@ -460,6 +491,7 @@ export default function Accountability() {
           <span>
             <b style={{ color: 'var(--text-primary)' }}>100-Day Plan:</b> checks automatically when the team member locks their weekly update. Historical completion before September 14 is preserved.
           </span>
+          <span><b style={{ color: 'var(--text-primary)' }}>Lead CS Review:</b> Head of Creative Strategy only, from the week of September 21. Checks when the prior week’s review is submitted or finalized; changes requested removes the check. This measures submission, not performance.</span>
           {!monthlyVisible && (
             <span style={{ color: 'var(--accent)' }}>
               Monthly Client Report and Monthly Survey columns only appear during the first week of each month.
