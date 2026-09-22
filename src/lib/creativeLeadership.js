@@ -1,5 +1,6 @@
 import { isHeadOfCreativeStrategy } from './creativeStrategyRoles.js'
 import { healthCurrentWeek, healthDueWeek, healthShiftWeek, isHealthDate, isHealthMonday } from './healthWeekly.js'
+import { newCreativeResults, validateCreativeResults } from './creativeLeadershipResults.js'
 
 export const CREATIVE_LEAD_FIRST_WEEK = '2026-09-14'
 export const CREATIVE_LEAD_EVENT = 'creative-leadership-updated'
@@ -35,7 +36,7 @@ export function safeCreativeEvidenceUrl(value) {
 
 export function newClientReview(client) {
   return { client_id: client.id, quality_status: '', research_check: '', brief_check: '', signoff_check: '',
-    learning_check: '', growth_guide_status: '', diagnosis: '', next_tests: '', blocker: '', evidence_url: '' }
+    learning_check: '', growth_guide_status: '', diagnosis: '', next_tests: '', blocker: '', evidence_url: '', results: newCreativeResults() }
 }
 
 export function creativeClientNeedsAction(row) {
@@ -58,6 +59,8 @@ export function validateCreativeReview(review, actions = []) {
     if (!includes(CREATIVE_GROWTH_OPTIONS, row.growth_guide_status)) return `${name}: choose a Growth Guide status.`
     if (!safeCreativeEvidenceUrl(row.evidence_url)) return `${name}: add a valid http(s) evidence link without embedded credentials.`
     if (!text(row.next_tests)) return `${name}: record the next tests or next action.`
+    const resultsError = validateCreativeResults(row.results, { required: review.results_version >= 1, submission: true })
+    if (resultsError) return `${name}: ${resultsError}`
     if (['blocked', 'insufficient_evidence'].includes(row.quality_status) && !text(row.blocker)) return `${name}: explain the blocker or missing evidence.`
     if (creativeClientNeedsAction(row)) {
       if (!text(row.diagnosis)) return `${name}: explain what needs attention.`

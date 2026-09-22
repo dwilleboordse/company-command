@@ -91,7 +91,9 @@ begin
   update public.creative_lead_reviews r set summary='Synthetic weekly summary',client_reviews=(
     select jsonb_agg(jsonb_build_object('client_id',c->>'id','quality_status','on_track',
       'research_check','pass','brief_check','pass','signoff_check','pass','learning_check','pass',
-      'growth_guide_status','updated','diagnosis','','next_tests','Test next hypothesis','blocker','','evidence_url','https://example.invalid/evidence'))
+      'growth_guide_status','updated','diagnosis','','next_tests','Test next hypothesis','blocker','','evidence_url','https://example.invalid/evidence',
+      'results',jsonb_build_object('status','no_tests','eligible_ads',0,'winners',0,'super_winners',0,
+        'blocked_ads',0,'inconclusive_ads',0,'evidence_url','https://example.invalid/results','notes','')))
       from jsonb_array_elements(r.client_snapshot) c
   ) where id=v_review.id and version=v_review.version returning * into v_review;
   perform pg_temp.cl_assert(v_review.version=2,'optimistic revision increments');

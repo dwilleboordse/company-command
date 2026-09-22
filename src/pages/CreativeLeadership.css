@@ -65,6 +65,7 @@
 .cl-client-name strong, .cl-client-spend strong { display: block; font-size: 13px; font-weight: 650; }
 .cl-client-name small, .cl-client-spend small { display: block; margin-top: 4px; color: var(--text-secondary); font-size: 11px; }
 .cl-client-spend strong { font-variant-numeric: tabular-nums; }
+.cl-client-spend > .cl-status { margin-top: 6px; }
 .cl-client-chevron { color: var(--accent); font-size: 11px; text-align: right; }
 .cl-client > summary > .cl-status { justify-self: start; }
 .cl-client-body { padding: 20px; }
@@ -112,11 +113,38 @@
 .cl-history-events ul { margin-left: 20px; }
 .cl-history-events li { margin-top: 8px; font-size: 12px; }
 .cl-history-events li small { color: var(--text-secondary); margin-left: 10px; }
+.cl-results-editor { display: grid; gap: 14px; padding: 18px; margin-bottom: 22px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg); }
+.cl-results-editor h3 { margin-top: 0; }
+.cl-results-editor > a { justify-self: start; font-size: 12px; }
+.cl-results-counts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.cl-results-counts .cl-field { min-width: 0; }
+.cl-results-counts input { font-variant-numeric: tabular-nums; }
+.cl-results-editor .cl-danger { font-size: 12px; }
+.cl-results-preview { display: flex; flex-wrap: wrap; gap: 10px 24px; font-size: 12px; }
+.cl-results-preview strong { font-size: 17px; }
+.cl-results-preview small { width: 100%; color: var(--text-secondary); }
+.cl-section-title { margin-bottom: 15px !important; }
+.cl-period-note { margin-top: -9px; }
+.cl-count-summary { display: flex; flex-wrap: wrap; gap: 15px 28px; }
+.cl-count-summary > span { display: flex; flex-direction: column; gap: 4px; color: var(--text-secondary); font-size: 11px; }
+.cl-count-summary strong { color: var(--text-primary); font-size: 22px; font-variant-numeric: tabular-nums; }
+.cl-count-summary small { font-size: 10px; }
+.cl-results-table table { min-width: 850px; }
+.cl-results-table td { font-variant-numeric: tabular-nums; }
+.cl-results-table td > .cl-status { margin-left: 5px; }
+.cl-framework { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.cl-framework > span { font-size: 12px; display: flex; flex-direction: column; gap: 4px; padding: 12px; background: var(--bg); border-radius: var(--radius); }
+.cl-framework strong { color: var(--accent); font-size: 20px; }
+.cl-benchmark-below { color: var(--amber); }
+.cl-benchmark-within, .cl-benchmark-above { color: var(--green); }
+.cl-benchmark-unavailable { color: var(--text-secondary); }
+.cl-metric > small .cl-status { font-size: 10px; margin-top: 2px; }
 @media (max-width: 1100px) {
   .cl-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cl-client > summary { grid-template-columns: minmax(160px, 1fr) minmax(100px, .6fr) auto; }
   .cl-client-chevron { display: none; }
   .cl-page-header { align-items: flex-start; flex-direction: column; }
+  .cl-framework { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 680px) {
   .cl-metrics { gap: 8px; }
@@ -136,4 +164,7 @@
   .cl-callout { padding: 13px; }
   .cl-alert { align-items: flex-start; flex-wrap: wrap; }
   .cl-page .btn { white-space: normal; }
+  .cl-results-editor { padding: 13px; }
+  .cl-results-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cl-framework { gap: 8px; }
 }

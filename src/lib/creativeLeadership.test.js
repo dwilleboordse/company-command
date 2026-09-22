@@ -4,8 +4,12 @@ import { addBusinessDays, canReviewCreativeLeadership, canUseCreativeLeadership,
   newClientReview, safeCreativeEvidenceUrl, validateCreativeAction, validateCreativeCoaching, validateCreativeReview, validateCreativeReviewWeek } from './creativeLeadership.js'
 
 const lead = { id: 'lead', is_active: true, role: 'athlete', position: 'head_of_creative_strategy' }
-const row = id => ({ ...newClientReview({ id }), quality_status: 'on_track', research_check: 'pass', brief_check: 'pass',
-  signoff_check: 'pass', learning_check: 'pass', growth_guide_status: 'updated', next_tests: 'Test a distinct premise', evidence_url: 'https://example.com/brief' })
+const row = id => {
+  const value = { ...newClientReview({ id }), quality_status: 'on_track', research_check: 'pass', brief_check: 'pass',
+    signoff_check: 'pass', learning_check: 'pass', growth_guide_status: 'updated', next_tests: 'Test a distinct premise', evidence_url: 'https://example.com/brief' }
+  delete value.results // Legacy reviews predate the manually entered results field.
+  return value
+}
 const review = () => ({ summary: 'Reviewed client strategy and next tests.', client_snapshot: [{ id: 'a', name: 'Client A' }, { id: 'b', name: 'Client B' }], client_reviews: [row('a'), row('b')] })
 
 test('partial action edits preserve omitted milestones and reject server-managed metadata', () => {

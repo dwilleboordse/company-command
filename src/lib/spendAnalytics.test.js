@@ -1,8 +1,17 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildSpendPayload, compareSpendClients, formatSpendMoney, isCompleteSpendEntry, lastCompletedSpendWeek, scopeSpendClients, spendClientOptionLabels, spendFormValues, spendShare, spendTrend, summarizeSpend } from './spendAnalytics.js'
+import { buildSpendPayload, compareSpendClients, formatSpendMoney, isCompleteSpendEntry, lastCompletedSpendWeek, scopeSpendClients, spendClientOptionLabels, spendFormValues, spendShare, spendStatus, spendTrend, summarizeSpend } from './spendAnalytics.js'
 
 const context = { clientId: 'client-a', enteredBy: 'user-a', weekStart: '2026-09-07' }
+
+test('leadership and dashboard spend health share the exact unrounded 20 and 50 percent boundaries', () => {
+  for (const [share, label] of [[null, 'No share available'], [undefined, 'No share available'],
+    [0, 'Low share'], [19.999, 'Low share'], [20, 'Healthy'], [49.999, 'Healthy'],
+    [50, 'Excellent'], [100, 'Excellent']]) assert.equal(spendStatus(share).label, label)
+  assert.equal(spendStatus(spendShare({ ddu_spend: null, total_spend: 100 })).label, 'No share available')
+  assert.equal(spendStatus(spendShare({ ddu_spend: 0, total_spend: 100 })).label, 'Low share')
+  assert.equal(spendStatus(spendShare({ ddu_spend: 0, total_spend: 0 })).label, 'No share available')
+})
 
 test('analytics client options disambiguate duplicate records without changing identities', () => {
   const clients = [
