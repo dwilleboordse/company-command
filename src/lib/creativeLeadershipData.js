@@ -8,6 +8,9 @@ const pick = (values, fields) => Object.fromEntries(fields.filter(key => Object.
 const coachingFields = ['strategist_id', 'client_id', 'observation', 'expected_standard', 'agreed_action', 'due_date', 'follow_up', 'outcome']
 
 export async function loadCreativeLeadership() {
+  const access = await supabase.rpc('can_access_creative_lead')
+  if (access.error) throw new Error(`Could not verify leadership access: ${access.error.message}`)
+  if (access.data !== true) throw new Error('Your account has not been provisioned for the private leadership workspace. Ask the CEO or Operations Manager to arrange access.')
   // Intentionally do not load fees, management health notes or survey answers.
   const queries = [
     ['reviews', () => supabase.from('creative_lead_reviews').select('*').order('week_start', { ascending: false }).order('id')],
