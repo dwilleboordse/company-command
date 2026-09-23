@@ -46,6 +46,7 @@ function initials(name = '') {
 }
 
 function roleLabel(member) {
+  if ((member?.position || member?.role) === 'ai_engineer') return 'AI Engineer'
   return (member?.position || member?.role || 'Unassigned')
     .replaceAll('_', ' ')
     .replace(/\b\w/g, letter => letter.toUpperCase())
@@ -655,9 +656,9 @@ function TeamOverview({
 }
 
 export default function MonthlySurvey() {
-  const { profile, isCEO, isManagement, isOps } = useAuth()
+  const { profile, hasFullAccess, isManagement, isOps } = useAuth()
   const canReviewTeam = isManagement || isOps
-  const canFinalizeFeedback = isCEO || isOps
+  const canFinalizeFeedback = hasFullAccess || isOps
   const targetMonth = previousSurveyMonth()
   const [view, setView] = useState('mine')
   const [questions, setQuestions] = useState([])

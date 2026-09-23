@@ -192,7 +192,7 @@ function RoadmapTable({ items, userId, onUpdated }) {
 }
 
 export default function HiringRoadmap() {
-  const { user, isCEO } = useAuth()
+  const { user, hasFullAccess } = useAuth()
   const [data, setData] = useState(null)
   const [items, setItems] = useState([])
   const [selectedMonth, setSelectedMonth] = useState('')
@@ -238,7 +238,7 @@ export default function HiringRoadmap() {
     workingDays: monthRecord?.working_days || 22,
   }), [workloadSet, data?.settings, monthRecord?.working_days])
 
-  if (!isCEO) return <div className="page-body"><div className="empty-state"><p>CEO access required.</p></div></div>
+  if (!hasFullAccess) return <div className="page-body"><div className="empty-state"><p>Executive or authorized AI Engineer access required.</p></div></div>
   if (loading) return <div className="loading-screen"><div className="spinner"/></div>
 
   const nextHire = signals.find(signal => ['hire_now', 'plan'].includes(signal.signal)) || signals[0]
@@ -279,7 +279,7 @@ export default function HiringRoadmap() {
         <ScenarioModel signals={signals} settings={data.settings} workingDays={monthRecord?.working_days || 22}/>
 
         <section className="planning-section">
-          <div className="planning-section-heading"><div><h2>Hiring plan</h2><p>Keep the decision, timing, rationale, and status in one CEO-only record.</p></div><button type="button" className="btn btn-ghost btn-sm" onClick={() => setPlanningSignal(null)}><Plus size={13}/>Add role</button></div>
+          <div className="planning-section-heading"><div><h2>Hiring plan</h2><p>Keep the decision, timing, rationale, and status in one restricted leadership record.</p></div><button type="button" className="btn btn-ghost btn-sm" onClick={() => setPlanningSignal(null)}><Plus size={13}/>Add role</button></div>
           <RoadmapTable items={items} userId={user.id} onUpdated={() => load(true)}/>
         </section>
 

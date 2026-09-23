@@ -1,6 +1,8 @@
-// This dashboard capability is narrower than all Operations staff and does not
-// grant CEO access to financial models, hiring, admin, or CEO-only key results.
+import { hasFullDashboardAccess } from './roleAccess.js'
+
+// Operations managers get the business overview without gaining privileged
+// modules. A separately authorized AI Engineer gets the complete application.
 export function hasBusinessDashboardAccess(profile) {
   return Boolean(profile && profile.is_active !== false
-    && (profile.role === 'ceo' || profile.position === 'ops_manager'))
+    && (hasFullDashboardAccess(profile) || profile.position === 'ops_manager'))
 }

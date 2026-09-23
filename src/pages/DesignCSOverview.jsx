@@ -482,6 +482,7 @@ function OrgChart({ profiles, clients }) {
     { key: 'strategy', label: 'Creative Strategy', people: profiles.filter(isCreativeStrategist) },
     { key: 'growth', label: 'Growth', people: profiles.filter(profile => ['media_buyer', 'email_marketer'].includes(profile.position)) },
     { key: 'production', label: 'Production', people: profiles.filter(profile => ['editor', 'designer', 'ugc_manager'].includes(profile.position)) },
+    { key: 'engineering', label: 'AI Engineering', people: profiles.filter(profile => profile.position === 'ai_engineer') },
   ]
   const assignedIds = new Set(activeClients.filter(client => ['cs_ids', 'mb_ids', 'editor_ids', 'designer_ids', 'ugc_ids'].some(key => parseIds(client[key]).length)).map(client => client.id))
 
@@ -524,7 +525,7 @@ function OrgChart({ profiles, clients }) {
 }
 
 export default function DesignCSOverview() {
-  const { isCEO, isOps } = useAuth()
+  const { hasFullAccess, isOps } = useAuth()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -681,7 +682,7 @@ export default function DesignCSOverview() {
     if (isLiveMonth && allocation) setEditing(allocation)
   }
 
-  if (!isCEO && !isOps) return <div className="page-body"><div className="empty-state"><p>CEO or Operations access required.</p></div></div>
+  if (!hasFullAccess && !isOps) return <div className="page-body"><div className="empty-state"><p>Executive, Operations or authorized AI Engineer access required.</p></div></div>
   if (loading) return <div className="loading-screen"><div className="spinner"/></div>
 
   const totalConcepts = monthAllocations.reduce((sum, item) => sum + Number(item.statics || 0) + Number(item.videos || 0), 0)

@@ -322,6 +322,7 @@ const POSITION_LABELS = {
   hr_manager:          'HR',
   marketing:           'Marketing',
   management:          'Management',
+  ai_engineer:         'AI Engineer',
   company_wide:        'Company Wide',
 }
 const DEPTS = Array.from(new Set(Object.keys(POSITION_LABELS).map(position => POSITION_LABELS[getRoleDiscipline(position)])))

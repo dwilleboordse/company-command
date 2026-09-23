@@ -446,6 +446,7 @@ export function nextMonthStart(monthStart) {
 export function roleLabel(position = '') {
   const labels = {
     ceo: 'CEO',
+    ai_engineer: 'AI Engineer',
     management: 'Management',
     ops_manager: 'Operations Manager',
     ops_assistant: 'Operations Assistant',

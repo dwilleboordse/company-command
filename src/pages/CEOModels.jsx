@@ -97,7 +97,7 @@ function AddModal({ activeTab, onClose, onSave }) {
 }
 
 export default function CEOModels() {
-  const { isCEO } = useAuth()
+  const { hasFullAccess } = useAuth()
   const [models, setModels] = useState({})
   const [entries, setEntries] = useState({})
   const [loading, setLoading] = useState(true)
@@ -131,9 +131,9 @@ export default function CEOModels() {
     load()
   }
 
-  if (!isCEO) return (
+  if (!hasFullAccess) return (
     <div style={{ display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minHeight:'60vh' }}>
-      <Lock size={40} color="var(--text-muted)"/><p className="text-muted" style={{ marginTop:12 }}>CEO access only.</p>
+      <Lock size={40} color="var(--text-muted)"/><p className="text-muted" style={{ marginTop:12 }}>Executive or authorized AI Engineer access required.</p>
     </div>
   )
 
@@ -145,7 +145,7 @@ export default function CEOModels() {
       <div className="page-header">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="page-title">CEO Models <span className="ceo-badge"><Lock size={9}/> CEO Only</span></h1>
+            <h1 className="page-title">CEO Models <span className="ceo-badge"><Lock size={9}/> Restricted</span></h1>
             <p className="page-subtitle">Growth, Business, and Financial models</p>
           </div>
           <button className="btn btn-primary" onClick={()=>setShowAdd(true)}><Plus size={15}/> Add Metric</button>

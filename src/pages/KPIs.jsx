@@ -12,6 +12,7 @@ const ROLE_LABELS = {
   creative_strategist:'Creative Strategist', editor:'Editor', designer:'Designer',
   ugc_manager:'UGC Manager', email_marketer:'Email Marketer', ops_manager:'Operations Manager',
   ops_assistant:'Operations Assistant', hr_manager:'HR Manager', management:'Management',
+  ai_engineer:'AI Engineer',
 }
 
 function getStatus(current, goal, direction) {
@@ -377,7 +378,7 @@ function KPIGroupCard({ kpi, members, allUserValues, onLog, onEdit, onDelete, is
 
 // ── MAIN PAGE ────────────────────────────────────────────────
 export default function KPIs() {
-  const { profile, isCEO, isManagement } = useAuth()
+  const { profile, hasFullAccess, isManagement } = useAuth()
   const [kpis, setKpis] = useState([])
   const [members, setMembers] = useState([])
   const [allUserValues, setAllUserValues] = useState({}) // key: `userId_kpiId` -> [entries]
@@ -395,8 +396,8 @@ export default function KPIs() {
 
     // Load KPI definitions
     let q = supabase.from('kpis').select('*').eq('is_active', true).order('department').order('role_type')
-    if (!isCEO && !isManagement) q = q.eq('visibility', 'team')
-    else if (!isCEO) q = q.in('visibility', ['team', 'management'])
+    if (!hasFullAccess && !isManagement) q = q.eq('visibility', 'team')
+    else if (!hasFullAccess) q = q.in('visibility', ['team', 'management'])
     // Athlete: only see KPIs for their role
     if (!isManagement && profile.position) q = q.in('role_type', [...new Set([profile.position, getRoleDiscipline(profile.position)])])
     if (dept !== 'all') q = q.eq('department', dept)

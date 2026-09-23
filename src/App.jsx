@@ -32,13 +32,13 @@ function LoadingPage({ children }) {
 }
 
 function PR({ children, ceo=false, mgmt=false, ops=false, ceoOps=false, creativeLeadership=false }) {
-  const { user, profile, loading, isOps } = useAuth()
+  const { user, profile, loading, isOps, isManagement, hasFullAccess } = useAuth()
   if (loading) return <div className="loading-screen"><div className="spinner"/></div>
   if (!user) return <Navigate to="/login" replace/>
   if (creativeLeadership && !canUseCreativeLeadership(profile)) return <Navigate to="/" replace/>
-  if (ceo && profile?.role!=='ceo') return <Navigate to="/" replace/>
-  if (ceoOps && profile?.role !== 'ceo' && !isOps) return <Navigate to="/" replace/>
-  if (mgmt && !['ceo','management'].includes(profile?.role) && !(ops && isOps)) return <Navigate to="/" replace/>
+  if (ceo && !hasFullAccess) return <Navigate to="/" replace/>
+  if (ceoOps && !hasFullAccess && !isOps) return <Navigate to="/" replace/>
+  if (mgmt && !isManagement && !(ops && isOps)) return <Navigate to="/" replace/>
   return children
 }
 

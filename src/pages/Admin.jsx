@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
+import { ACCESS_ROLE_LABELS } from '../lib/roleAccess'
 import { Plus, Trash2, Edit2, Users, Lock } from 'lucide-react'
 
 const ROLE_LABELS = {
@@ -8,7 +9,7 @@ const ROLE_LABELS = {
   head_of_creative_strategy: 'Head of Creative Strategy',
   editor: 'Editor', designer: 'Designer', ugc_manager: 'UGC Manager', email_marketer: 'Email Marketer',
   ops_manager: 'Operations Manager', ops_assistant: 'Operations Assistant', hr_manager: 'HR Manager',
-  management: 'Management',
+  management: 'Management', ai_engineer: 'AI Engineer',
 }
 
 const DEPT_LABELS = {
@@ -80,7 +81,9 @@ function InviteModal({ onClose, onSave }) {
               <option value="athlete">Athlete (default)</option>
               <option value="management">Management</option>
               <option value="ceo">CEO</option>
+              <option value="ai_engineer">AI Engineer</option>
             </select>
+            {form.role === 'ai_engineer' && <p className="text-muted text-sm">Full access requires separate provisioning by a trusted system administrator. Selecting the role alone does not grant it.</p>}
           </div>
           <div className="form-group">
             <label>Department</label>
@@ -134,7 +137,9 @@ function EditProfileModal({ member, onClose, onSave }) {
               <option value="athlete">Athlete</option>
               <option value="management">Management</option>
               <option value="ceo">CEO</option>
+              <option value="ai_engineer">AI Engineer</option>
             </select>
+            {form.role === 'ai_engineer' && <p className="text-muted text-sm">Full access requires separate provisioning by a trusted system administrator. Selecting the role alone does not grant it.</p>}
           </div>
           <div className="form-group">
             <label>Department</label>
@@ -160,7 +165,7 @@ function EditProfileModal({ member, onClose, onSave }) {
 }
 
 export default function Admin() {
-  const { isCEO, profile } = useAuth()
+  const { hasFullAccess, profile } = useAuth()
   const [members, setMembers] = useState([])
   const [loading, setLoading] = useState(true)
   const [showInvite, setShowInvite] = useState(false)
@@ -176,10 +181,10 @@ export default function Admin() {
     setLoading(false)
   }
 
-  if (!isCEO) return (
+  if (!hasFullAccess) return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh' }}>
       <Lock size={40} color="var(--text-muted)" />
-      <p className="text-muted" style={{ marginTop: 12 }}>CEO access only.</p>
+      <p className="text-muted" style={{ marginTop: 12 }}>Executive or authorized AI Engineer access required.</p>
     </div>
   )
 
@@ -190,7 +195,7 @@ export default function Admin() {
     return acc
   }, {})
 
-  const roleColor = { ceo: 'amber', management: 'blue', athlete: 'green' }
+  const roleColor = { ceo: 'amber', management: 'blue', athlete: 'green', ai_engineer: 'blue' }
 
   return (
     <>
@@ -199,7 +204,7 @@ export default function Admin() {
           <div>
             <h1 className="page-title">
               Admin
-              <span className="ceo-badge"><Lock size={9} /> CEO Only</span>
+              <span className="ceo-badge"><Lock size={9} /> Restricted</span>
             </h1>
             <p className="page-subtitle">Team management, roles, and system configuration</p>
           </div>
@@ -233,6 +238,10 @@ export default function Admin() {
               <div className="stat-box">
                 <div className="stat-box-label">CEO</div>
                 <div className="stat-box-value text-amber">{members.filter(m => m.role === 'ceo').length}</div>
+              </div>
+              <div className="stat-box">
+                <div className="stat-box-label">AI Engineers</div>
+                <div className="stat-box-value text-accent">{members.filter(m => m.role === 'ai_engineer').length}</div>
               </div>
             </div>
 
@@ -271,7 +280,7 @@ export default function Admin() {
                               </td>
                               <td className="text-secondary font-mono text-sm">{m.email}</td>
                               <td className="text-secondary text-sm">{ROLE_LABELS[m.position] || '—'}</td>
-                              <td><span className={`badge ${roleColor[m.role] || 'gray'}`}>{m.role}</span></td>
+                              <td><span className={`badge ${roleColor[m.role] || 'gray'}`}>{ACCESS_ROLE_LABELS[m.role] || m.role}</span></td>
                               <td>
                                 <button className="btn btn-ghost btn-sm btn-icon" onClick={() => setEditMember(m)}>
                                   <Edit2 size={13} />
@@ -294,6 +303,7 @@ export default function Admin() {
             <h3 style={{ fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 700, marginBottom: 16 }}>Role Access Matrix</h3>
             {[
               { role: 'CEO', color: 'amber', access: ['Dashboard (all)', 'KPIs (all departments)', 'Milestones (all)', 'Calendar (all team)', 'Meetings (all)', 'CEO Models (private)', 'Admin panel', 'Add/edit KPIs', 'Update any KPI value'] },
+              { role: 'AI Engineer', color: 'blue', access: ['Full Command Center application access once separately authorized', 'Executive models and hiring roadmap', 'All clients, allocations, spend and analytics', 'Team health, survey responses and feedback finalization', 'Private Creative Leadership reviews and coaching', 'Admin panel and all department OKRs', 'Does not grant Supabase, Vercel or infrastructure credentials'] },
               { role: 'Management', color: 'blue', access: ['Dashboard (team view)', 'KPIs (team + management metrics)', 'Milestones (all, can update)', 'Calendar (all team)', 'Meetings (all + recap)', 'Add/edit KPIs', 'Update KPI values'] },
               { role: 'Athlete', color: 'green', access: ['Dashboard (own KPIs + milestones)', 'KPIs (own role only, read)', 'Milestones (own role, can update status)', 'Calendar (own days + week outcomes)', 'Meetings (own prep only)'] },
             ].map(({ role, color, access }) => (

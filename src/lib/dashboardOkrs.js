@@ -17,12 +17,13 @@ export function formatOkrLabel(value) {
   if (value === 'company_wide' || value === 'company') return 'Company'
   if (value === 'ugc_manager') return 'UGC Manager'
   if (value === 'ceo') return 'CEO'
+  if (value === 'ai_engineer') return 'AI Engineer'
   return String(value).replaceAll('_', ' ').replace(/\b\w/g, character => character.toUpperCase())
 }
 
-export function canViewOkr(kr, { isCEO = false, isManagement = false } = {}) {
-  if (kr.visibility === 'ceo') return isCEO
-  if (kr.visibility === 'management') return isCEO || isManagement
+export function canViewOkr(kr, { isCEO = false, hasFullAccess = false, isManagement = false } = {}) {
+  if (kr.visibility === 'ceo') return isCEO || hasFullAccess
+  if (kr.visibility === 'management') return isCEO || hasFullAccess || isManagement
   return !kr.visibility || kr.visibility === 'team'
 }
 
@@ -115,8 +116,8 @@ export function getOkrMeasurement(kr, { values = [], userId, personal = false, a
 }
 
 export function buildDashboardOkrs({ objectives = [], keyResults = [], milestones = [], values = [],
-  profile = {}, isCEO = false, isManagement = false, scope = 'personal', department = 'all', asOf }) {
-  const viewer = { isCEO, isManagement: isManagement || isCEO }
+  profile = {}, isCEO = false, hasFullAccess = false, isManagement = false, scope = 'personal', department = 'all', asOf }) {
+  const viewer = { isCEO, hasFullAccess, isManagement: isManagement || isCEO || hasFullAccess }
   return objectives.filter(objective => objective.is_active !== false).flatMap(objective => {
     if (scope === 'department') {
       const selected = viewer.isManagement ? department : normalize(profile.department)

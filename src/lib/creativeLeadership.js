@@ -1,4 +1,5 @@
 import { isHeadOfCreativeStrategy } from './creativeStrategyRoles.js'
+import { hasFullDashboardAccess } from './roleAccess.js'
 import { healthCurrentWeek, healthDueWeek, healthShiftWeek, isHealthDate, isHealthMonday } from './healthWeekly.js'
 import { newCreativeResults, validateCreativeResults } from './creativeLeadershipResults.js'
 
@@ -6,7 +7,7 @@ export const CREATIVE_LEAD_FIRST_WEEK = '2026-09-14'
 export const CREATIVE_LEAD_EVENT = 'creative-leadership-updated'
 const active = profile => Boolean(profile?.id && profile.is_active === true)
 export const isCreativeLead = profile => active(profile) && isHeadOfCreativeStrategy(profile)
-export const canReviewCreativeLeadership = profile => active(profile) && (profile.role === 'ceo' || profile.position === 'ops_manager')
+export const canReviewCreativeLeadership = profile => active(profile) && (hasFullDashboardAccess(profile) || profile.position === 'ops_manager')
 export const canUseCreativeLeadership = profile => isCreativeLead(profile) || canReviewCreativeLeadership(profile)
 export const creativeLeadDueWeek = (now = new Date()) => healthDueWeek(now)
 export const shiftCreativeLeadWeek = healthShiftWeek

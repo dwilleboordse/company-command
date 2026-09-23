@@ -23,7 +23,8 @@ const SLACK_KEY = 'slack_participation'
 const alphabeticalCollator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true })
 
 function memberRoleLabel(member) {
-  return (member.position || member.role || 'Unassigned').replace(/_/g, ' ')
+  const position = member.position || member.role || 'Unassigned'
+  return position === 'ai_engineer' ? 'AI Engineer' : position.replace(/_/g, ' ')
 }
 
 function compareMembersByRoleThenName(a, b) {

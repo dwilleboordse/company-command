@@ -5,10 +5,11 @@ import { supabase } from '../lib/supabase'
 import { useTheme } from '../contexts/ThemeContext'
 import HundredDayPlanReminder from './HundredDayPlanReminder'
 import { canUseCreativeLeadership } from '../lib/creativeLeadership'
+import { ACCESS_ROLE_LABELS } from '../lib/roleAccess'
 import { LayoutDashboard, Target, LogOut, Settings, TrendingUp, TrendingDown, Users, DollarSign, Menu, X, FileText, Trophy, Heart, UserCheck, Sun, Moon, ClipboardList, BarChart3, Compass, ShieldCheck, Network, BriefcaseBusiness } from 'lucide-react'
 
 export default function Layout() {
-  const { profile, signOut, isCEO, isManagement, isOps } = useAuth()
+  const { profile, signOut, hasFullAccess, isManagement, isOps } = useAuth()
   const { theme, toggle } = useTheme()
   const navigate = useNavigate()
   const location = useLocation()
@@ -70,16 +71,16 @@ export default function Layout() {
             <>
               <p className="nav-section-label">Clients</p>
               <NavLink to="/client-roster" className={nl}><Users size={16}/> Client Roster</NavLink>
-              {(isCEO || isOps) && <NavLink to="/design-cs" className={nl}><Network size={16}/> Design &amp; CS</NavLink>}
+              {(hasFullAccess || isOps) && <NavLink to="/design-cs" className={nl}><Network size={16}/> Design &amp; CS</NavLink>}
               <NavLink to="/clients" className={nl}><Heart size={16}/> Client Health</NavLink>
               <p className="nav-section-label">Team</p>
               <NavLink to="/team-health" className={nl}><UserCheck size={16}/> Team Health</NavLink>
             </>
           )}
 
-          {isCEO&&(
+          {hasFullAccess&&(
             <>
-              <p className="nav-section-label">CEO Only</p>
+              <p className="nav-section-label">Executive &amp; Admin</p>
               <NavLink to="/hiring-roadmap" className={nl}><BriefcaseBusiness size={16}/> Hiring Roadmap</NavLink>
               <NavLink to="/ceo" className={nl}><TrendingUp size={16}/> Models</NavLink>
               <NavLink to="/admin" className={nl}><Settings size={16}/> Admin</NavLink>
@@ -119,7 +120,7 @@ export default function Layout() {
             <div className="user-avatar">{avatarUrl||profile?.avatar_url?<img src={avatarUrl||profile?.avatar_url} alt=""/>:initials}</div>
             <div className="user-info">
               <div className="user-name">{profile?.full_name||'Loading...'}</div>
-              <div className="user-role">{uploading?'Uploading...':profile?.role||''}</div>
+              <div className="user-role">{uploading?'Uploading...':ACCESS_ROLE_LABELS[profile?.role]||profile?.role||''}</div>
             </div>
             <button className="sign-out-btn" onClick={e=>{e.stopPropagation();handleSignOut()}}><LogOut size={15}/></button>
           </div>

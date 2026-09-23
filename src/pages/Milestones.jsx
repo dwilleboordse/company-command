@@ -7,7 +7,7 @@ import { ChevronDown, ChevronUp, Plus, Trash2, Edit2, Check, X } from 'lucide-re
 const STATUS_OPTIONS=['not_started','started','half','three_quarters','completed']
 const STATUS_LABELS={not_started:'Not Started',started:'Started',half:'50% Done',three_quarters:'75% Done',completed:'Completed'}
 const STATUS_COLORS={not_started:'gray',started:'red',half:'amber',three_quarters:'amber',completed:'green'}
-const ROLE_LABELS={marketing:'Marketing',media_buyer:'Media Buyer',creative_strategist:'Creative Strategist',editor:'Editor',designer:'Designer',ugc_manager:'UGC Manager',email_marketer:'Email Marketer',ops_manager:'Operations Manager',ops_assistant:'Operations Assistant',hr_manager:'HR Manager',management:'Management'}
+const ROLE_LABELS={marketing:'Marketing',media_buyer:'Media Buyer',creative_strategist:'Creative Strategist',editor:'Editor',designer:'Designer',ugc_manager:'UGC Manager',email_marketer:'Email Marketer',ops_manager:'Operations Manager',ops_assistant:'Operations Assistant',hr_manager:'HR Manager',management:'Management',ai_engineer:'AI Engineer'}
 
 function pct(milestones) {
   if (!milestones.length) return 0

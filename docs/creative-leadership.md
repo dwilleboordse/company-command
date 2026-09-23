@@ -5,8 +5,8 @@ Private workspace at `/creative-leadership`, linked from Tracking and the dashbo
 ## Scope and permissions
 
 - Explicitly active Head of Creative Strategy: starts their own weekly review, saves drafts, and submits it.
-- Explicitly active CEO and Operations Manager: inspect reviews, request changes with feedback, and finalize submitted reviews.
-- Those three roles can maintain actions and private coaching notes. This does not grant the Head CS broader management access.
+- Explicitly active CEO and Operations Manager, plus a separately provisioned AI Engineer reviewer: inspect reviews, request changes with feedback, and finalize submitted reviews.
+- These authorized leadership users can maintain actions and private coaching notes. This does not grant the Head CS broader management access.
 - Operations assistants and other existing Accountability users can read only the minimal review-completion signal, not the private review or coaching records.
 - An active strategist can see only feedback deliberately published to them, on their dashboard. Private coaching text is never copied automatically.
 - New private-table access additionally requires a server-managed capability grant, seeded for the existing active Head CS, Operations Manager, and CEO. Ordinary application users cannot add or alter these grants. Future leadership changes must be provisioned through a trusted database migration/admin operation as well as updating the profile role.

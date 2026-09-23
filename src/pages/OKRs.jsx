@@ -10,12 +10,14 @@ const ROLE_LABELS = {
   creative_strategist:'Creative Strategist', editor:'Editor', designer:'Designer',
   ugc_manager:'UGC Manager', email_marketer:'Email Marketer', ops_manager:'Operations Manager',
   ops_assistant:'Operations Assistant', hr_manager:'HR Manager', management:'Management',
+  ai_engineer:'AI Engineer',
 }
 const ROLE_COLORS = {
   creative_strategist:'#16a34a', media_buyer:'#3b82f6', editor:'#8b5cf6',
   designer:'#dc2626', ugc_manager:'#06b6d4', email_marketer:'#d97706',
   ops_manager:'#3b82f6', ops_assistant:'#06b6d4', hr_manager:'#a78bfa',
   marketing:'#d97706', management:'#7c3aed', company_wide:'#d97706',
+  ai_engineer:'#0891b2',
 }
 
 const INIT_STATUSES = [
@@ -330,7 +332,7 @@ function InitiativeRow({ ms, kr, allMembers, isManagement, onEdit, onDelete, onS
 }
 
 // ── KR BLOCK ─────────────────────────────────────────────────
-function KRBlock({ kr, milestones, allMembers, onEdit, onDelete, onInitiativeChange, isManagement, isCEO }) {
+function KRBlock({ kr, milestones, allMembers, onEdit, onDelete, onInitiativeChange, isManagement }) {
   const [expanded, setExpanded] = useState(false)
   const [addingInit, setAddingInit] = useState(false)
   const [editingInit, setEditingInit] = useState(null)
@@ -459,7 +461,7 @@ function KRBlock({ kr, milestones, allMembers, onEdit, onDelete, onInitiativeCha
 }
 
 // ── OBJECTIVE CARD ────────────────────────────────────────────
-function ObjectiveCard({ objective, keyResults, milestones, allMembers, onAddKR, onEditKR, onDeleteKR, onEditObj, onDeleteObj, onInitiativeChange, isManagement, isCEO }) {
+function ObjectiveCard({ objective, keyResults, milestones, allMembers, onAddKR, onEditKR, onDeleteKR, onEditObj, onDeleteObj, onInitiativeChange, isManagement, hasFullAccess }) {
   const [expanded, setExpanded] = useState(true)
   const color = ROLE_COLORS[objective.role_type]||'var(--accent)'
   const objAssignees = parseAssignees(objective.assignee_ids)
@@ -467,7 +469,7 @@ function ObjectiveCard({ objective, keyResults, milestones, allMembers, onAddKR,
   const qProg = quarterProgress(objective.quarter)
 
   const visibleKRs = keyResults.filter(kr=>{
-    if (kr.visibility==='ceo') return isCEO
+    if (kr.visibility==='ceo') return hasFullAccess
     if (kr.visibility==='management') return isManagement
     return true
   })
@@ -579,7 +581,7 @@ function ObjectiveCard({ objective, keyResults, milestones, allMembers, onAddKR,
               <KRBlock key={kr.id} kr={kr} milestones={milestones} allMembers={allMembers}
                 onEdit={onEditKR} onDelete={onDeleteKR}
                 onInitiativeChange={onInitiativeChange}
-                isManagement={isManagement} isCEO={isCEO}/>
+                isManagement={isManagement}/>
             ))
           )}
         </div>
@@ -591,7 +593,7 @@ function ObjectiveCard({ objective, keyResults, milestones, allMembers, onAddKR,
 
 // ── MAIN PAGE ─────────────────────────────────────────────────
 export default function OKRs() {
-  const { profile, isCEO, isManagement } = useAuth()
+  const { profile, hasFullAccess, isManagement } = useAuth()
   const [objectives,setObjectives]=useState([])
   const [keyResults,setKeyResults]=useState([])
   const [allMembers,setAllMembers]=useState([])
@@ -684,7 +686,7 @@ export default function OKRs() {
       onEditObj={o=>setEditObj(o)}
       onDeleteObj={deleteObjective}
       onInitiativeChange={load}
-      isManagement={isManagement} isCEO={isCEO}/>
+      isManagement={isManagement} hasFullAccess={hasFullAccess}/>
   )
 
   return (

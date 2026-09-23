@@ -182,7 +182,7 @@ function MonthView({ userId, month, year }) {
 }
 
 export default function Calendar() {
-  const { profile, isManagement, isCEO } = useAuth()
+  const { profile, isManagement, hasFullAccess } = useAuth()
   const [weekStart, setWeekStart] = useState(getMonday())
   const [members, setMembers] = useState([])
   const [viewMode, setViewMode] = useState('own')
@@ -205,7 +205,7 @@ export default function Calendar() {
   const displayMembers = viewMode === 'own' || !isManagement
     ? [profile]
     : members.filter(m => {
-        if (m.role === 'ceo' && !isCEO && m.id !== profile?.id) return false
+        if (m.role === 'ceo' && !hasFullAccess && m.id !== profile?.id) return false
         return true
       })
 

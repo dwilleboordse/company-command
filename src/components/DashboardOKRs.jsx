@@ -64,7 +64,7 @@ function ObjectiveOverview({ objective }) {
 }
 
 export default function DashboardOKRs() {
-  const { profile, isCEO, isManagement } = useAuth()
+  const { profile, hasFullAccess, isManagement } = useAuth()
   const [scope, setScope] = useState(hasBusinessDashboardAccess(profile) ? 'company' : 'personal')
   const [department, setDepartment] = useState('all')
   const [data, setData] = useState({ objectives: [], keyResults: [], milestones: [], values: [] })
@@ -87,7 +87,7 @@ export default function DashboardOKRs() {
         if (objectives.error) throw objectives.error
         let keyResults = { data: [] }, milestones = { data: [] }, values = { data: [] }
         if (objectives.data.length) {
-          const visibility = ['team', ...(isManagement ? ['management'] : []), ...(isCEO ? ['ceo'] : [])]
+          const visibility = ['team', ...(isManagement ? ['management'] : []), ...(hasFullAccess ? ['ceo'] : [])]
           keyResults = await fetchAllRows(() => supabase.from('key_results')
             .select('id,objective_id,title,metric_name,goal_value,goal_direction,unit,current_value,current_value_recorded_at,visibility,assignee_ids,is_active')
             .in('objective_id', objectives.data.map(row => row.id)).in('visibility', visibility)
@@ -116,9 +116,9 @@ export default function DashboardOKRs() {
     }
     load()
     return () => { cancelled = true }
-  }, [profile?.id, isCEO, isManagement, quarter, asOf, retryKey])
+  }, [profile?.id, hasFullAccess, isManagement, quarter, asOf, retryKey])
 
-  const objectiveRows = buildDashboardOkrs({ ...data, profile: profile || {}, isCEO, isManagement,
+  const objectiveRows = buildDashboardOkrs({ ...data, profile: profile || {}, hasFullAccess, isManagement,
     scope, department, asOf })
   const results = objectiveRows.flatMap(objective => objective.results)
   const measured = results.filter(kr => kr.measurement.measured).length
