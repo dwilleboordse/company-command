@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
   BarChart3,
@@ -25,6 +25,7 @@ import {
   YAxis,
 } from 'recharts'
 import { useAuth } from '../contexts/AuthContext'
+import SurveyFeedbackReplies from '../components/SurveyFeedbackReplies'
 import {
   cleanSurveyFeedback,
   formatSurveyMonth,
@@ -93,7 +94,7 @@ function FeedbackStatusPill({ feedback }) {
   return <span className={`survey-feedback-status ${status}`}>{label}</span>
 }
 
-function MyFeedbackPanel({ questions, submissions, feedbackRows }) {
+function MyFeedbackPanel({ questions, submissions, feedbackRows, replyState }) {
   const [selectedSubmissionId, setSelectedSubmissionId] = useState('')
   const submissionsById = useMemo(
     () => new Map(submissions.map(submission => [submission.id, submission])),
@@ -107,11 +108,24 @@ function MyFeedbackPanel({ questions, submissions, feedbackRows }) {
   if (!finalizedItems.length) return null
 
   const activeItem = finalizedItems.find(item => item.submission.id === selectedSubmissionId) || finalizedItems[0]
-  const answeredFeedback = questions.filter(question => activeItem.feedback.feedback?.[question.question_key])
+  const knownQuestionKeys = new Set(questions.map(question => question.question_key))
+  const archivedQuestions = Object.keys(activeItem.feedback.feedback || {})
+    .filter(key => !knownQuestionKeys.has(key))
+    .map(key => ({ question_key: key, prompt: `Archived survey question: ${key}`, response_type: 'long_text' }))
+  const answeredFeedback = [...questions, ...archivedQuestions].filter(question => activeItem.feedback.feedback?.[question.question_key])
   const publishedPraises = activeItem.feedback.praises?.trim() || ''
   const publishedGrowthNotes = activeItem.feedback.growth_notes?.trim() || ''
 
   return (
+    <SurveyFeedbackReplies
+      key={activeItem.submission.id}
+      submission={activeItem.submission}
+      feedback={activeItem.feedback}
+      questions={questions}
+      canReply={activeItem.submission.user_id === replyState.viewerId}
+      replyState={replyState}
+    >
+      {({ renderThread, replySummary }) => (
     <section className="card survey-my-feedback">
       <div className="survey-my-feedback-heading">
         <div className="survey-feedback-icon"><MessageSquareText size={18}/></div>
@@ -131,6 +145,7 @@ function MyFeedbackPanel({ questions, submissions, feedbackRows }) {
           </label>
         )}
       </div>
+      {replySummary}
       <div className="survey-my-feedback-list">
         {answeredFeedback.map(question => {
           const answer = activeItem.submission.responses?.[question.question_key]
@@ -141,6 +156,7 @@ function MyFeedbackPanel({ questions, submissions, feedbackRows }) {
                 <p className="survey-feedback-original-answer">Your answer: {question.response_type === 'scale_1_10' ? `${answer}/10` : String(answer || '').trim() || 'No response provided.'}</p>
               </div>
               <div className="survey-feedback-published"><MessageSquareText size={14}/><p>{activeItem.feedback.feedback[question.question_key]}</p></div>
+              {renderThread(`question:${question.question_key}`)}
             </article>
           )
         })}
@@ -155,15 +171,19 @@ function MyFeedbackPanel({ questions, submissions, feedbackRows }) {
             <article>
               <span>Praises</span>
               <p>{publishedPraises || 'No praise was added for this review.'}</p>
+              {renderThread('praises')}
             </article>
             <article>
               <span>Growth notes</span>
               <p>{publishedGrowthNotes || 'No growth note was added for this review.'}</p>
+              {renderThread('growth_notes')}
             </article>
           </div>
         </div>
       )}
     </section>
+      )}
+    </SurveyFeedbackReplies>
   )
 }
 
@@ -261,7 +281,7 @@ function SurveyForm({ questions, responses, setResponses, submission, profile, o
       {locked ? (
         <div className="survey-actions survey-locked-actions card">
           <LockKeyhole size={17}/>
-          <div><strong>Survey locked after feedback finalization</strong><span>Your submitted answers and the published feedback now remain together as a fixed record.</span></div>
+          <div><strong>Survey locked after feedback finalization</strong><span>Your submitted answers and published feedback stay fixed. You can answer management’s questions in the reply boxes above.</span></div>
         </div>
       ) : (
         <div className="survey-actions card">
@@ -308,6 +328,7 @@ function FeedbackWorkspace({
   saving,
   onSaveDraft,
   onFinalize,
+  replyState,
 }) {
   const [draftFeedback, setDraftFeedback] = useState(() => feedbackRecord?.feedback || {})
   const [praises, setPraises] = useState(() => feedbackRecord?.praises || '')
@@ -325,12 +346,18 @@ function FeedbackWorkspace({
   const feedbackCount = surveyFeedbackCount(questions, draftFeedback)
   const hasReviewContent = feedbackCount > 0 || Boolean(cleanedPraises) || Boolean(cleanedGrowthNotes)
   const finalized = feedbackRecord?.status === 'finalized'
+  const knownQuestionKeys = new Set(questions.map(question => question.question_key))
+  const archivedQuestions = finalized ? Object.keys(feedbackRecord?.feedback || {})
+    .filter(key => !knownQuestionKeys.has(key))
+    .map(key => ({ question_key: key, prompt: `Archived survey question: ${key}`, response_type: 'long_text', section: 'Archived question' })) : []
 
   function setAnswerFeedback(questionKey, value) {
     setDraftFeedback(current => ({ ...current, [questionKey]: value }))
   }
 
   return (
+    <SurveyFeedbackReplies submission={submission} feedback={feedbackRecord} questions={questions} replyState={replyState}>
+      {({ renderThread, replySummary }) => (
     <div className="card survey-feedback-workspace">
       <div className="survey-feedback-workspace-heading">
         <div>
@@ -340,9 +367,10 @@ function FeedbackWorkspace({
         </div>
         <FeedbackStatusPill feedback={feedbackRecord}/>
       </div>
+      {replySummary}
 
       <div className="survey-feedback-answer-list">
-        {questions.map(question => {
+        {[...questions, ...archivedQuestions].map(question => {
           const answer = submission.responses?.[question.question_key]
           const numericAnswer = Number(answer)
           const hasAnswer = question.response_type === 'scale_1_10'
@@ -386,6 +414,7 @@ function FeedbackWorkspace({
                   />
                 )}
               </div>
+              {renderThread(`question:${question.question_key}`)}
             </article>
           )
         })}
@@ -400,15 +429,18 @@ function FeedbackWorkspace({
           </div>
         </div>
         <div className="survey-feedback-summary-grid">
-          <label>
+          <div className="survey-feedback-summary-field">
+            <label htmlFor={`feedback-praises-${submission.id}`}>
             <span>Praises</span>
             <small>Recognize specific strengths, progress, or positive impact.</small>
+            </label>
             {finalized ? (
               <div className={`survey-feedback-final-text ${cleanedPraises ? '' : 'empty'}`}>
                 <p>{cleanedPraises || 'No praise was added for this review.'}</p>
               </div>
             ) : (
               <textarea
+                id={`feedback-praises-${submission.id}`}
                 rows={4}
                 maxLength={5000}
                 value={praises}
@@ -417,16 +449,20 @@ function FeedbackWorkspace({
                 placeholder="What should this team member keep doing?"
               />
             )}
-          </label>
-          <label>
+            {renderThread('praises')}
+          </div>
+          <div className="survey-feedback-summary-field">
+            <label htmlFor={`feedback-growth-${submission.id}`}>
             <span>Growth notes</span>
             <small>Record a practical development focus or next-step coaching note.</small>
+            </label>
             {finalized ? (
               <div className={`survey-feedback-final-text ${cleanedGrowthNotes ? '' : 'empty'}`}>
                 <p>{cleanedGrowthNotes || 'No growth note was added for this review.'}</p>
               </div>
             ) : (
               <textarea
+                id={`feedback-growth-${submission.id}`}
                 rows={4}
                 maxLength={5000}
                 value={growthNotes}
@@ -435,7 +471,8 @@ function FeedbackWorkspace({
                 placeholder="What is the most useful next area for growth?"
               />
             )}
-          </label>
+            {renderThread('growth_notes')}
+          </div>
         </div>
       </section>
 
@@ -443,7 +480,7 @@ function FeedbackWorkspace({
         <div>
           {finalized ? <ShieldCheck size={17}/> : <LockKeyhole size={17}/>}
           <span>{finalized
-            ? `Finalized ${formatSubmittedAt(feedbackRecord.finalized_at)}. This feedback is locked and visible to the team member.`
+            ? `Finalized ${formatSubmittedAt(feedbackRecord.finalized_at)}. The review stays locked; the team member can add replies to your notes.`
             : `${feedbackCount} answer${feedbackCount === 1 ? '' : 's'} with feedback${cleanedPraises || cleanedGrowthNotes ? ' plus month-level notes' : ''}. Drafts remain private until finalized.`}</span>
         </div>
         {!finalized && (
@@ -464,6 +501,8 @@ function FeedbackWorkspace({
         )}
       </div>
     </div>
+      )}
+    </SurveyFeedbackReplies>
   )
 }
 
@@ -478,6 +517,7 @@ function TeamOverview({
   savingFeedbackId,
   onSaveFeedbackDraft,
   onFinalizeFeedback,
+  replyState,
 }) {
   const [selectedMemberId, setSelectedMemberId] = useState('')
   const months = useMemo(() => {
@@ -640,6 +680,7 @@ function TeamOverview({
                 saving={savingFeedbackId === selectedSubmission.id}
                 onSaveDraft={onSaveFeedbackDraft}
                 onFinalize={onFinalizeFeedback}
+                replyState={replyState}
               />
             </>
           ) : (
@@ -673,6 +714,30 @@ export default function MonthlySurvey() {
   const [savingFeedbackId, setSavingFeedbackId] = useState('')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  // Keep unsent replies and retry IDs across in-page month/person/view switches.
+  // They intentionally never enter persistent browser storage on shared devices.
+  const [replyDrafts, setReplyDrafts] = useState({})
+  const [replyVersion, setReplyVersion] = useState(0)
+  const replySendLocks = useRef(new Set())
+  const replyState = {
+    drafts: replyDrafts,
+    setDrafts: setReplyDrafts,
+    sendLocks: replySendLocks,
+    viewerId: profile?.id,
+    version: replyVersion,
+    onSent: () => setReplyVersion(current => current + 1),
+  }
+  const hasUnsentReplies = Object.values(replyDrafts).some(draft => draft.text?.trim() || draft.sending)
+
+  useEffect(() => {
+    if (!hasUnsentReplies) return
+    function warnBeforeLeaving(event) {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    globalThis.addEventListener('beforeunload', warnBeforeLeaving)
+    return () => globalThis.removeEventListener('beforeunload', warnBeforeLeaving)
+  }, [hasUnsentReplies])
 
   const currentSubmission = mySubmissions.find(submission => submission.survey_month === targetMonth)
   const currentFeedback = currentSubmission
@@ -781,7 +846,7 @@ export default function MonthlySurvey() {
 
   async function finalizeFeedback(feedbackRecord) {
     if (!canFinalizeFeedback || !feedbackRecord || savingFeedbackId) return
-    const confirmed = globalThis.confirm('Finalize this feedback? It will become visible to the team member and both the feedback and survey answers will be locked.')
+    const confirmed = globalThis.confirm('Finalize this feedback? It will become visible to the team member and both the feedback and survey answers will be locked. The team member can still add replies to your feedback.')
     if (!confirmed) return
 
     setSavingFeedbackId(feedbackRecord.submission_id)
@@ -799,7 +864,7 @@ export default function MonthlySurvey() {
       setError(finalizeError.message || 'Unable to finalize the feedback.')
     } else {
       setFeedbackRows(current => [data, ...current.filter(item => item.submission_id !== data.submission_id)])
-      setMessage('Feedback finalized. It is now visible to the team member and the review record is locked.')
+      setMessage('Feedback finalized. The review record is locked and visible to the team member, who can now reply to your feedback.')
     }
     setSavingFeedbackId('')
   }
@@ -837,7 +902,7 @@ export default function MonthlySurvey() {
                   : `This survey became available on the first of the month and reviews ${formatSurveyMonth(targetMonth)}.`}</p>
               </div>
             </div>
-            <MyFeedbackPanel questions={questions} submissions={mySubmissions} feedbackRows={feedbackRows}/>
+            <MyFeedbackPanel questions={questions} submissions={mySubmissions} feedbackRows={feedbackRows} replyState={replyState}/>
             <SurveyForm
               questions={questions}
               responses={responses}
@@ -861,6 +926,7 @@ export default function MonthlySurvey() {
             savingFeedbackId={savingFeedbackId}
             onSaveFeedbackDraft={saveFeedbackDraft}
             onFinalizeFeedback={finalizeFeedback}
+            replyState={replyState}
           />
         )}
       </div>

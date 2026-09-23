@@ -191,8 +191,8 @@
 .survey-published-summary-heading p { margin-top: 2px; color: var(--text-muted); font-size: 10px; }
 .survey-published-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 0 18px 18px; }
 .survey-published-summary-grid article { padding: 12px 13px; border: 1px solid color-mix(in srgb, var(--green) 22%, var(--border)); border-radius: 9px; background: var(--green-dim); }
-.survey-published-summary-grid span { display: block; margin-bottom: 6px; color: var(--green); font: 700 8px var(--font-mono); letter-spacing: .8px; text-transform: uppercase; }
-.survey-published-summary-grid p { color: var(--text-primary); font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
+.survey-published-summary-grid article > span { display: block; margin-bottom: 6px; color: var(--green); font: 700 8px var(--font-mono); letter-spacing: .8px; text-transform: uppercase; }
+.survey-published-summary-grid article > p { color: var(--text-primary); font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
 
 .survey-form-sections { display: flex; flex-direction: column; gap: 14px; }
 .survey-section-card { padding: 0; overflow: hidden; }
