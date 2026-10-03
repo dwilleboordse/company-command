@@ -21,66 +21,21 @@ import HundredDayPlan from './pages/HundredDayPlan'
 import Accountability from './pages/Accountability'
 import ChurnAnalysis from './pages/ChurnAnalysis'
 import { canUseCreativeLeadership } from './lib/creativeLeadership'
-
-const DesignCSOverview = lazy(() => import('./pages/DesignCSOverview'))
-const HiringRoadmap = lazy(() => import('./pages/HiringRoadmap'))
-const MonthlySurvey = lazy(() => import('./pages/MonthlySurvey'))
-const CreativeLeadership = lazy(() => import('./pages/CreativeLeadership'))
-
-function LoadingPage({ children }) {
-  return <Suspense fallback={<div className="loading-screen"><div className="spinner"/></div>}>{children}</Suspense>
+const Q4Workspace=lazy(()=>import('./pages/Q4Workspace'))
+const DesignCSOverview=lazy(()=>import('./pages/DesignCSOverview'))
+const HiringRoadmap=lazy(()=>import('./pages/HiringRoadmap'))
+const MonthlySurvey=lazy(()=>import('./pages/MonthlySurvey'))
+const CreativeLeadership=lazy(()=>import('./pages/CreativeLeadership'))
+function LoadingPage({children}){return <Suspense fallback={<div className="loading-screen"><div className="spinner"/></div>}>{children}</Suspense>}
+function PR({children,ceo=false,mgmt=false,ops=false,ceoOps=false,creativeLeadership=false}){
+ const {user,profile,loading,isOps,isManagement,hasFullAccess}=useAuth()
+ if(loading)return <div className="loading-screen"><div className="spinner"/></div>
+ if(!user)return <Navigate to="/login" replace/>
+ if(creativeLeadership&&!canUseCreativeLeadership(profile))return <Navigate to="/" replace/>
+ if(ceo&&!hasFullAccess)return <Navigate to="/" replace/>
+ if(ceoOps&&!hasFullAccess&&!isOps)return <Navigate to="/" replace/>
+ if(mgmt&&!isManagement&&!(ops&&isOps))return <Navigate to="/" replace/>
+ return children
 }
-
-function PR({ children, ceo=false, mgmt=false, ops=false, ceoOps=false, creativeLeadership=false }) {
-  const { user, profile, loading, isOps, isManagement, hasFullAccess } = useAuth()
-  if (loading) return <div className="loading-screen"><div className="spinner"/></div>
-  if (!user) return <Navigate to="/login" replace/>
-  if (creativeLeadership && !canUseCreativeLeadership(profile)) return <Navigate to="/" replace/>
-  if (ceo && !hasFullAccess) return <Navigate to="/" replace/>
-  if (ceoOps && !hasFullAccess && !isOps) return <Navigate to="/" replace/>
-  if (mgmt && !isManagement && !(ops && isOps)) return <Navigate to="/" replace/>
-  return children
-}
-
-function AppRoutes() {
-  const { user, loading } = useAuth()
-  if (loading) return <div className="loading-screen"><div className="spinner"/></div>
-  return (
-    <Routes>
-      <Route path="/login" element={user?<Navigate to="/" replace/>:<Login/>}/>
-      <Route path="/" element={<PR><Layout/></PR>}>
-        <Route index element={<Dashboard/>}/>
-        <Route path="okrs" element={<OKRs/>}/>
-        <Route path="100-day-plan" element={<HundredDayPlan/>}/>
-        <Route path="monthly-survey" element={<LoadingPage><MonthlySurvey/></LoadingPage>}/>
-        <Route path="calendar" element={<Calendar/>}/>
-        <Route path="meetings" element={<Meetings/>}/>
-        <Route path="spend" element={<SpendTracker/>}/>
-        <Route path="creative-leadership" element={<PR creativeLeadership><LoadingPage><CreativeLeadership/></LoadingPage></PR>}/>
-        <Route path="changelog" element={<ChangeLog/>}/>
-        <Route path="rewards" element={<Rewards/>}/>
-        <Route path="accountability" element={<PR mgmt ops><Accountability/></PR>}/>
-        <Route path="clients" element={<PR mgmt ops><Clients/></PR>}/>
-        <Route path="team-health" element={<PR mgmt ops><TeamHealth/></PR>}/>
-        <Route path="analytics" element={<PR mgmt><Analytics/></PR>}/>
-        <Route path="churn-analysis" element={<PR mgmt><ChurnAnalysis/></PR>}/>
-        <Route path="client-roster" element={<PR mgmt ops><ClientRoster/></PR>}/>
-        <Route path="design-cs" element={<PR ceoOps><LoadingPage><DesignCSOverview/></LoadingPage></PR>}/>
-        <Route path="onboarding" element={<PR><Onboarding/></PR>}/>
-        <Route path="ceo" element={<PR ceo><CEOModels/></PR>}/>
-        <Route path="hiring-roadmap" element={<PR ceo><LoadingPage><HiringRoadmap/></LoadingPage></PR>}/>
-        <Route path="admin" element={<PR ceo><Admin/></PR>}/>
-      </Route>
-    </Routes>
-  )
-}
-
-export default function App() {
-  return (
-    <BrowserRouter>
-      <AuthProvider>
-        <AppRoutes/>
-      </AuthProvider>
-    </BrowserRouter>
-  )
-}
+function AppRoutes(){const {user,loading}=useAuth();if(loading)return <div className="loading-screen"><div className="spinner"/></div>;return <Routes><Route path="/login" element={user?<Navigate to="/" replace/>:<Login/>}/><Route path="/" element={<PR><Layout/></PR>}><Route index element={<Dashboard/>}/><Route path="okrs" element={<LoadingPage><Q4Workspace initialTab="company"/></LoadingPage>}/><Route path="100-day-plan" element={<LoadingPage><Q4Workspace initialTab="plan"/></LoadingPage>}/><Route path="okrs/history" element={<OKRs/>}/><Route path="100-day-plan/history" element={<HundredDayPlan/>}/><Route path="monthly-survey" element={<LoadingPage><MonthlySurvey/></LoadingPage>}/><Route path="calendar" element={<Calendar/>}/><Route path="meetings" element={<Meetings/>}/><Route path="spend" element={<SpendTracker/>}/><Route path="creative-leadership" element={<PR creativeLeadership><LoadingPage><CreativeLeadership/></LoadingPage></PR>}/><Route path="changelog" element={<ChangeLog/>}/><Route path="rewards" element={<Rewards/>}/><Route path="accountability" element={<PR mgmt ops><Accountability/></PR>}/><Route path="clients" element={<PR mgmt ops><Clients/></PR>}/><Route path="team-health" element={<PR mgmt ops><TeamHealth/></PR>}/><Route path="analytics" element={<PR mgmt><Analytics/></PR>}/><Route path="churn-analysis" element={<PR mgmt><ChurnAnalysis/></PR>}/><Route path="client-roster" element={<PR mgmt ops><ClientRoster/></PR>}/><Route path="design-cs" element={<PR ceoOps><LoadingPage><DesignCSOverview/></LoadingPage></PR>}/><Route path="onboarding" element={<PR><Onboarding/></PR>}/><Route path="ceo" element={<PR ceo><CEOModels/></PR>}/><Route path="hiring-roadmap" element={<PR ceo><LoadingPage><HiringRoadmap/></LoadingPage></PR>}/><Route path="admin" element={<PR ceo><Admin/></PR>}/></Route></Routes>}
+export default function App(){return <BrowserRouter><AuthProvider><AppRoutes/></AuthProvider></BrowserRouter>}
