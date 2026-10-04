@@ -1,0 +1,33 @@
+/* Shared dropdown decoration. Page background shorthands must not reset
+   arrow geometry and tile the icon across the field. Native interaction,
+   focus styles, disabled states and existing colours are preserved. */
+:root {
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%235A6478' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+}
+[data-theme="dark"] {
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%237a8ba8' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+}
+:root select:not([multiple]) {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: var(--select-chevron);
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px 12px;
+  padding-right: 36px;
+}
+/* Listboxes are not collapsed dropdowns. */
+:root select[multiple],
+:root select[size]:not([size="0"]):not([size="1"]) {
+  -webkit-appearance: auto;
+  appearance: auto;
+  background-image: none;
+  padding-right: 12px;
+}
+@media (forced-colors: active) {
+  :root select:not([multiple]) {
+    -webkit-appearance: auto;
+    appearance: auto;
+    background-image: none;
+  }
+}
