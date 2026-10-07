@@ -1,5 +1,22 @@
 import { dateKey, parseReportingDate } from './reportingPeriods.js'
 
+const DAY_MS = 24 * 60 * 60 * 1000
+
+// Tenure as the Churn Analysis client table shows it: days ÷ 30.4375 (an average month).
+export function tenureMonths(startValue, endValue) {
+  const start = parseReportingDate(startValue)
+  const end = parseReportingDate(endValue)
+  if (!start || !end || end < start) return null
+  return (end - start) / (DAY_MS * 30.4375)
+}
+
+// Vanessa's rule (6 Oct 2026): month N is a shown tenure of N.0–N.9 mo; 0 is under 1 month.
+export function tenureBand(startValue, endValue) {
+  const months = tenureMonths(startValue, endValue)
+  return months == null ? null : Math.floor(Number(months.toFixed(1)))
+}
+
+// Calendar rule used by the Analytics "When clients churn" chart.
 // Month 1 is [start, first calendar anniversary); month-end anniversaries clamp.
 export function partnershipMonth(startValue, endValue) {
   const start = parseReportingDate(startValue)

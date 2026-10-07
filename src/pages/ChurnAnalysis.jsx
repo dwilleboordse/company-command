@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { buildTimeBuckets, getPeriodOptions, resolvePeriod } from '../lib/reportingPeriods'
 import { fetchAllRows } from '../lib/reportingData'
+import { analyzeChurnTenure, tenureBand, tenureMonths } from '../lib/churnTenure'
 import {
   AlertTriangle,
   CalendarDays,
@@ -80,13 +81,6 @@ function isoDate(date) {
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
-}
-
-function monthsBetween(startValue, endValue) {
-  const start = parseDate(startValue)
-  const end = parseDate(endValue)
-  if (!start || !end || end < start) return null
-  return (end - start) / (1000 * 60 * 60 * 24 * 30.4375)
 }
 
 function fmtMoney(value) {
@@ -429,7 +423,7 @@ export default function ChurnAnalysis() {
     const activeMRR = activeClients.reduce((total, client) => total + (Number(profileFor(client)?.monthly_retainer) || 0), 0)
     const knownActiveMRR = activeClients.filter(client => profileFor(client)?.monthly_retainer != null).length
     const tenures = selectedExits
-      .map(client => monthsBetween(profileFor(client)?.engagement_start, profileFor(client)?.engagement_end))
+      .map(client => tenureMonths(profileFor(client)?.engagement_start, profileFor(client)?.engagement_end))
       .filter(value => value != null)
     const averageTenure = tenures.length ? tenures.reduce((sum, value) => sum + value, 0) / tenures.length : null
     const atRiskClients = activeClients.filter(client => ['High', 'Leaving'].includes(latestHealth[client.id]?.churn_risk))
@@ -493,7 +487,7 @@ export default function ChurnAnalysis() {
       const past = cohort.clients.filter(client => statusOf(client) === 'past')
       const retained = cohort.clients.length - past.length
       const exitedTenures = past
-        .map(client => monthsBetween(profileFor(client)?.engagement_start, profileFor(client)?.engagement_end))
+        .map(client => tenureMonths(profileFor(client)?.engagement_start, profileFor(client)?.engagement_end))
         .filter(value => value != null)
       return {
         cohort: cohort.key,
@@ -534,6 +528,13 @@ export default function ChurnAnalysis() {
       cohorts,
     }
   }, [clients, records, latestHealth, period])
+
+  // Same exits as the Analytics "When clients churn" chart: past clients whose end date falls in the period.
+  const tenure = useMemo(() => analyzeChurnTenure(clients, records, period), [clients, records, period])
+  const earlyChurn = useMemo(() => [0, 1, 2, 3].map(band => {
+    const exits = tenure.exits.filter(exit => tenureBand(exit.start, exit.end) === band)
+    return { band, exits, share: tenure.exits.length ? exits.length / tenure.exits.length * 100 : 0 }
+  }), [tenure.exits])
 
   const filteredClients = useMemo(() => clients.filter(client => {
     const status = statusOf(client)
@@ -639,6 +640,26 @@ export default function ChurnAnalysis() {
                   ? `${metrics.knownAtRiskMRR ? fmtMoney(metrics.atRiskMRR) : 'Unknown'} MRR at risk · ${metrics.knownAtRiskMRR}/${metrics.atRiskClients.length} retainers known`
                   : 'No current clients at High / Leaving risk'}
                 color={metrics.atRiskClients.length ? 'var(--red)' : 'var(--green)'}/>
+            </div>
+
+            <div className="card" style={{ padding: 18, marginBottom: 24 }}>
+              <SectionHeader title="Early churn by partnership month"
+                subtitle={`Clients who left in their 1st, 2nd or 3rd month with DDU · ${period.dateLabel}`}/>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 12 }}>
+                {earlyChurn.map(({ band, exits, share }) => (
+                  <div key={band} title={exits.map(exit => `${exit.name} (${tenureMonths(exit.start, exit.end).toFixed(1)} mo)`).join(', ') || 'No clients'}>
+                    <MetricCard icon={<CalendarDays size={13}/>} label={band ? `Churned in month ${band}` : 'Left before 1 month'} value={exits.length}
+                      color={exits.length ? 'var(--red)' : 'var(--text-primary)'}
+                      detail={`Tenure ${band}.0–${band}.9 mo · ${tenure.exits.length
+                        ? `${share.toFixed(1)}% of ${tenure.exits.length} dated exits`
+                        : 'no dated exits in this period'}`}/>
+                  </div>
+                ))}
+              </div>
+              <p style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 10 }}>
+                The month is the whole number of the tenure in the client table below, so 1.0–1.9 mo is month 1. Hover a card to see the clients.
+                {tenure.missingStartCount > 0 && ` ${tenure.missingStartCount} exits in this period have no start date and are not counted.`}
+              </p>
             </div>
 
             {metrics.completeRecords < clients.length && (
@@ -804,7 +825,7 @@ export default function ChurnAnalysis() {
                       const record = records[client.id] || {}
                       const status = statusOf(client)
                       const endForTenure = record.engagement_end || (status !== 'past' ? isoDate(new Date()) : '')
-                      const tenure = monthsBetween(record.engagement_start, endForTenure)
+                      const tenure = tenureMonths(record.engagement_start, endForTenure)
                       const risk = latestHealth[client.id]?.churn_risk
                       return (
                         <tr key={client.id}>
