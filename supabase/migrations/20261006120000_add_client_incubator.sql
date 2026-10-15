@@ -61,3 +61,32 @@ create policy "Ops/Mgmt can manage client_goals"
 create policy "Ops/Mgmt can read clickup_client_tasks"
   on public.clickup_client_tasks for select to authenticated
   using ((select public.can_manage_ops()));
+
+-- Who made a change is taken from the signed-in user, never from what the browser sends.
+create function public.stamp_client_incubator() returns trigger
+  language plpgsql set search_path = '' as $$
+begin
+  new.updated_by := coalesce((select auth.uid()), new.updated_by);
+  new.updated_at := now();
+  if tg_op = 'UPDATE' then new.created_at := old.created_at; end if;
+  return new;
+end $$;
+
+create trigger client_incubator_stamp before insert or update on public.client_incubator
+  for each row execute function public.stamp_client_incubator();
+
+create function public.stamp_client_goals() returns trigger
+  language plpgsql set search_path = '' as $$
+begin
+  if tg_op = 'INSERT' then
+    new.created_by := coalesce((select auth.uid()), new.created_by);
+  else
+    new.created_by := old.created_by;
+    new.created_at := old.created_at;
+  end if;
+  new.updated_at := now();
+  return new;
+end $$;
+
+create trigger client_goals_stamp before insert or update on public.client_goals
+  for each row execute function public.stamp_client_goals();

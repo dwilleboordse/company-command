@@ -26,21 +26,25 @@ function tenureStage(band) {
 export function incubatorRoster({ clients, profiles, memberships = [], today = new Date() }) {
   const todayKey = dateKey(today)
   const byClient = new Map(memberships.map(row => [row.client_id, row]))
-  const members = [], graduated = [], undated = []
+  const members = [], graduated = [], undated = [], upcoming = []
   for (const client of clients) {
     if (client.is_active === false || client.is_archived) continue
     const start = profiles[client.id]?.engagement_start ?? null
     const band = tenureBand(start, todayKey)
-    const entry = { client, start, band, tenure: tenureMonths(start, todayKey), membership: byClient.get(client.id) ?? null }
+    // A start date after today has no tenure yet: the client is signed but not started, not undated.
+    const notStarted = start != null && band == null && parseReportingDate(start) > parseReportingDate(todayKey)
+    const entry = { client, start, band, notStarted, tenure: tenureMonths(start, todayKey), membership: byClient.get(client.id) ?? null }
     const stage = tenureStage(band)
     if (entry.membership?.status === 'graduated') graduated.push(entry)
     else if (entry.membership?.status === 'active') members.push({ ...entry, reason: 'manual', stage: band != null && band <= INCUBATOR_LAST_MONTH ? stage : 'support' })
+    else if (notStarted) upcoming.push(entry)
     else if (band == null) undated.push(entry)
     else if (stage) members.push({ ...entry, reason: 'new', stage })
   }
   const order = { overdue: 0, review: 1, support: 2, active: 3 }
   members.sort((a, b) => order[a.stage] - order[b.stage] || (b.tenure ?? 0) - (a.tenure ?? 0) || a.client.name.localeCompare(b.client.name))
-  return { members, graduated, undated }
+  upcoming.sort((a, b) => a.start.localeCompare(b.start))
+  return { members, graduated, undated, upcoming }
 }
 
 function shiftDays(key, days) {
@@ -128,6 +132,7 @@ export function graduationChecks({ timeline, tasks, goals = [], actions = [] }) 
     { key: 'spend', label: 'DDU spend did not drop vs the week before', pass: spend?.dduChange == null ? null : spend.dduChange >= 0 },
     { key: 'tasks', label: 'No delayed ClickUp tasks', pass: tasks ? tasks.delayed.length === 0 : null },
     { key: 'goals', label: 'Client goals are written down', pass: goals.length > 0 },
-    { key: 'actions', label: 'All action items are done', pass: actions.every(action => action.is_done) },
+    // No action items means nothing was checked, so this stays unknown rather than passing.
+    { key: 'actions', label: 'All action items are done', pass: actions.length ? actions.every(action => action.is_done) : null },
   ]
 }

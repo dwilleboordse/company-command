@@ -26,6 +26,11 @@ function fmtWeek(key) {
   return key ? new Date(`${key}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—'
 }
 
+// A stored timestamp shown as the viewer's local day (slicing the ISO string would give the UTC day).
+function fmtStamp(iso) {
+  return iso ? new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—'
+}
+
 function groupBy(rows, key = 'client_id') {
   return rows.reduce((groups, row) => { (groups[row[key]] ||= []).push(row); return groups }, {})
 }
@@ -326,18 +331,27 @@ export default function Incubator() {
     return { ...roster, members, addOptions }
   }, [data, lastWeek])
 
+  // Every write returns the rows it touched, so a change the database quietly refused is reported, not shown as saved.
   async function save(request) {
     setSaving(true)
     setNotice('')
-    const { error } = await request()
-    setSaving(false)
-    if (error) { setNotice(error.message); return false }
-    await load()
-    return true
+    try {
+      const { data, error } = await request().select()
+      if (error) { setNotice(error.message); return false }
+      if (!data?.length) { setNotice('Nothing was saved. You may not have permission to change this, or it was already changed.'); return false }
+      await load()
+      return true
+    } catch (error) {
+      setNotice(error?.message || 'The change could not be saved.')
+      return false
+    } finally {
+      setSaving(false)
+    }
   }
   const stamp = () => ({ updated_by: profile?.id ?? null, updated_at: new Date().toISOString() })
+  // Moving a client back in clears an earlier graduation date.
   const setMembership = (clientId, status, note) => save(() => supabase.from('client_incubator')
-    .upsert({ client_id: clientId, status, note: note || null, ...(status === 'graduated' ? { graduated_at: new Date().toISOString() } : {}), ...stamp() }, { onConflict: 'client_id' }))
+    .upsert({ client_id: clientId, status, note: note || null, graduated_at: status === 'graduated' ? new Date().toISOString() : null, ...stamp() }, { onConflict: 'client_id' }))
   const release = clientId => save(() => supabase.from('client_incubator').delete().eq('client_id', clientId))
 
   if (!isManagement) {
@@ -409,10 +423,12 @@ export default function Incubator() {
                             <td style={{ width: 24 }}>{open ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}</td>
                             <td>
                               <div style={{ fontWeight: 700, fontSize: 12 }}>{member.client.name}</div>
-                              <div style={{ fontSize: 10, ...muted }}>{member.start ? `Started ${fmtWeek(member.start)} ${member.start.slice(0, 4)} · ${member.tenure.toFixed(1)} mo` : 'No start date'}</div>
+                              <div style={{ fontSize: 10, ...muted }}>{!member.start ? 'No start date'
+                                : member.tenure == null ? `Starts ${fmtWeek(member.start)} ${member.start.slice(0, 4)}`
+                                : `Started ${fmtWeek(member.start)} ${member.start.slice(0, 4)} · ${member.tenure.toFixed(1)} mo`}</div>
                               {member.membership?.note && <div style={{ fontSize: 10, color: 'var(--purple)' }}>{member.membership.note}</div>}
                             </td>
-                            <td style={{ whiteSpace: 'nowrap', fontWeight: 650 }}>{incubatorMonthLabel(member.band)}</td>
+                            <td style={{ whiteSpace: 'nowrap', fontWeight: 650 }}>{member.notStarted ? 'Not started' : incubatorMonthLabel(member.band)}</td>
                             <td><Badge color={stage.color} bg={stage.bg}>{stage.label}</Badge></td>
                             <td>
                               {member.risk ? <span style={{ fontWeight: 700, color: RISK_COLORS[member.risk.risk] }}>{member.risk.risk}</span> : <span style={muted}>—</span>}
@@ -488,14 +504,14 @@ export default function Incubator() {
               Week-over-week arrows compare with the previous logged week and name it when a week was skipped.
             </p>
 
-            {(view.graduated.length > 0 || view.undated.length > 0) && (
+            {(view.graduated.length > 0 || view.undated.length > 0 || view.upcoming.length > 0) && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: 14 }}>
                 {view.graduated.length > 0 && (
                   <div className="card" style={{ padding: 14 }}>
                     <SectionTitle icon={<GraduationCap size={13}/>} title="Graduated" detail="Monitored like normal clients"/>
                     {view.graduated.map(entry => (
                       <div key={entry.client.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 12, padding: '5px 0', borderBottom: '1px solid var(--border)' }}>
-                        <span><strong>{entry.client.name}</strong>{entry.membership?.graduated_at && <span style={{ fontSize: 10, ...muted }}> · {fmtWeek(entry.membership.graduated_at.slice(0, 10))}</span>}{entry.membership?.note && <span style={{ fontSize: 10, ...muted }}> · {entry.membership.note}</span>}</span>
+                        <span><strong>{entry.client.name}</strong>{entry.membership?.graduated_at && <span style={{ fontSize: 10, ...muted }}> · {fmtStamp(entry.membership.graduated_at)}</span>}{entry.membership?.note && <span style={{ fontSize: 10, ...muted }}> · {entry.membership.note}</span>}</span>
                         <button className="btn btn-ghost btn-sm" disabled={saving} onClick={() => release(entry.client.id)}>Undo</button>
                       </div>
                     ))}
@@ -506,6 +522,12 @@ export default function Incubator() {
                     <SectionTitle icon={<HelpCircle size={13}/>} title="Can't be placed" detail="No start date in Churn Analysis"/>
                     <p style={{ fontSize: 11, ...muted }}>{view.undated.map(entry => entry.client.name).join(', ')}</p>
                     <p style={{ fontSize: 10, ...muted, marginTop: 6 }}>Add their start date in Churn Analysis, or move them in by hand above.</p>
+                  </div>
+                )}
+                {view.upcoming.length > 0 && (
+                  <div className="card" style={{ padding: 14 }}>
+                    <SectionTitle icon={<Sprout size={13}/>} title="Not started yet" detail="Join automatically on their start date"/>
+                    <p style={{ fontSize: 11, ...muted }}>{view.upcoming.map(entry => `${entry.client.name} (${fmtWeek(entry.start)})`).join(', ')}</p>
                   </div>
                 )}
               </div>

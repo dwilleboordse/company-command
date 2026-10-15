@@ -76,5 +76,24 @@ test('task progress counts delivered work and flags only open, unpaused, past-du
 
 test('graduation checks report missing data as unknown instead of failing', () => {
   const checks = graduationChecks({ timeline: [], tasks: null, goals: [], actions: [] })
-  assert.deepEqual(checks.map(check => check.pass), [null, null, null, null, false, true])
+  assert.deepEqual(checks.map(check => check.pass), [null, null, null, null, false, null])
+})
+
+test('action items pass only when there are some and all are done', () => {
+  const pass = actions => graduationChecks({ timeline: [], tasks: null, actions }).find(check => check.key === 'actions').pass
+  assert.equal(pass([]), null)
+  assert.equal(pass([{ is_done: true }, { is_done: false }]), false)
+  assert.equal(pass([{ is_done: true }]), true)
+})
+
+test('a client with a start date after today is upcoming, not undated', () => {
+  const clients = [{ id: 'f', name: 'Future' }, { id: 'n', name: 'No date' }, { id: 'm', name: 'Moved' }]
+  const profiles = { f: { engagement_start: '2026-10-20' }, m: { engagement_start: '2026-11-02' } }
+  const roster = incubatorRoster({ clients, profiles, memberships: [{ client_id: 'm', status: 'active' }], today: new Date(2026, 9, 16) })
+  assert.deepEqual(roster.upcoming.map(entry => entry.client.id), ['f'])
+  assert.deepEqual(roster.undated.map(entry => entry.client.id), ['n'])
+  const moved = roster.members.find(entry => entry.client.id === 'm')
+  assert.equal(moved.stage, 'support')
+  assert.equal(moved.tenure, null)
+  assert.equal(moved.notStarted, true)
 })
