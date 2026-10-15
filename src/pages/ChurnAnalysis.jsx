@@ -644,7 +644,7 @@ export default function ChurnAnalysis() {
 
             <div className="card" style={{ padding: 18, marginBottom: 24 }}>
               <SectionHeader title="Early churn by partnership month"
-                subtitle={`Clients who left in their 1st, 2nd or 3rd month with DDU · ${period.dateLabel}`}/>
+                subtitle={`Past clients by tenure when they left: under 1 month, or month 1, 2 or 3 · ${period.dateLabel}`}/>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 12 }}>
                 {earlyChurn.map(({ band, exits, share }) => (
                   <div key={band} title={exits.map(exit => `${exit.name} (${tenureMonths(exit.start, exit.end).toFixed(1)} mo)`).join(', ') || 'No clients'}>
