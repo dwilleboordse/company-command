@@ -4,6 +4,7 @@ import {
   HelpCircle, ListChecks, Plus, ShieldCheck, Sprout, Target, Trash2, Users,
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import SectionBoundary from '../components/SectionBoundary'
 import { supabase } from '../lib/supabase'
 import { fetchAllRows } from '../lib/reportingData'
 import { healthDueWeek } from '../lib/healthWeekly'
@@ -469,6 +470,7 @@ export default function Incubator() {
                           {open && (
                             <tr>
                               <td colSpan={10} style={{ background: 'var(--bg)', padding: 16 }}>
+                                <SectionBoundary name={`${member.client.name}'s details`}>
                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))', gap: 14 }}>
                                   <div className="card" style={{ padding: 14, gridColumn: '1 / -1' }}>
                                     <SectionTitle icon={<Users size={13}/>} title="Week by week" detail="Risk and relationship from the Monday Client Health check · spend from the Spend Tracker"/>
@@ -501,6 +503,7 @@ export default function Incubator() {
                                       onGraduate={note => setMembership(id, 'graduated', note || member.membership?.note)} onRelease={() => release(id)}/>
                                   </div>
                                 </div>
+                                </SectionBoundary>
                               </td>
                             </tr>
                           )}
