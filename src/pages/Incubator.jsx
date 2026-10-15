@@ -7,6 +7,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { fetchAllRows } from '../lib/reportingData'
 import { healthDueWeek } from '../lib/healthWeekly'
+import { dubaiDay } from '../lib/q4Cycle'
 import { formatSpendMoney } from '../lib/spendAnalytics'
 import {
   graduationChecks, incubatorMonthLabel, incubatorRoster, latestLogged, taskProgress, weeklyTimeline,
@@ -292,7 +293,9 @@ export default function Incubator() {
   const [notice, setNotice] = useState('')
   const [saving, setSaving] = useState(false)
   const [expanded, setExpanded] = useState(null)
+  // One business day for everyone, in Dubai time like the weekly checks, so viewers in other time zones agree.
   const lastWeek = useMemo(() => healthDueWeek(), [])
+  const todayKey = useMemo(() => dubaiDay(), [])
 
   const load = useCallback(async () => {
     try {
@@ -311,13 +314,13 @@ export default function Incubator() {
   const view = useMemo(() => {
     if (!data) return null
     const profiles = Object.fromEntries(data.profiles.map(row => [row.client_id, row]))
-    const roster = incubatorRoster({ clients: data.clients, profiles, memberships: data.memberships })
+    const roster = incubatorRoster({ clients: data.clients, profiles, memberships: data.memberships, today: todayKey })
     const health = groupBy(data.health), spend = groupBy(data.spend), goals = groupBy(data.goals)
     const actions = groupBy(data.actions), tasks = groupBy(data.tasks)
     const members = roster.members.map(member => {
       const id = member.client.id
       const timeline = weeklyTimeline({ health: health[id] || [], spend: spend[id] || [], lastWeek, weeks: 8 })
-      const progress = tasks[id] ? taskProgress(tasks[id]) : null
+      const progress = tasks[id] ? taskProgress(tasks[id], todayKey) : null
       const clientGoals = goals[id] || [], clientActions = actions[id] || []
       return {
         ...member, timeline, progress, goals: clientGoals, actions: clientActions,
@@ -329,7 +332,7 @@ export default function Incubator() {
     const inIds = new Set(members.map(member => member.client.id))
     const addOptions = data.clients.filter(client => client.is_active !== false && !client.is_archived && !inIds.has(client.id))
     return { ...roster, members, addOptions }
-  }, [data, lastWeek])
+  }, [data, lastWeek, todayKey])
 
   // Every write returns the rows it touched, so a change the database quietly refused is reported, not shown as saved.
   async function save(request) {
@@ -339,7 +342,12 @@ export default function Incubator() {
       const { data, error } = await request().select()
       if (isMissingTable(error)) { setNotice("This can't be saved yet: the incubator tables haven't been added to the database."); return false }
       if (error) { setNotice(error.message); return false }
-      if (!data?.length) { setNotice('Nothing was saved. You may not have permission to change this, or it was already changed.'); return false }
+      if (!data?.length) {
+        // Usually someone else changed it first: reload so the page shows their version and the next click works.
+        await load()
+        setNotice('Nothing was saved: someone may have changed this just now, or you may not have permission. The page now shows the latest version.')
+        return false
+      }
       await load()
       return true
     } catch (error) {
@@ -480,7 +488,11 @@ export default function Incubator() {
                                     <SectionTitle icon={<CheckCircle2 size={13}/>} title="Actions to take"/>
                                     <ActionsPanel actions={member.actions} saving={saving}
                                       onAdd={action => save(() => supabase.from('client_actions').insert({ client_id: id, ...action, is_done: false, created_by: profile?.id ?? null }))}
-                                      onToggle={action => save(() => supabase.from('client_actions').update({ is_done: !action.is_done, updated_at: new Date().toISOString() }).eq('id', action.id))}
+                                      onToggle={action => save(() => {
+                                        // Same guard as Client Health: only change the action if nobody changed it since it was loaded.
+                                        const query = supabase.from('client_actions').update({ is_done: !action.is_done, updated_at: new Date().toISOString() }).eq('id', action.id)
+                                        return action.updated_at ? query.eq('updated_at', action.updated_at) : query
+                                      })}
                                       onRemove={action => save(() => supabase.from('client_actions').delete().eq('id', action.id))}/>
                                   </div>
                                   <div className="card" style={{ padding: 14 }}>

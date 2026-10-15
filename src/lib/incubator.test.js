@@ -86,6 +86,18 @@ test('action items pass only when there are some and all are done', () => {
   assert.equal(pass([{ is_done: true }]), true)
 })
 
+test('a day key gives the same month to every viewer, whatever their time zone', () => {
+  const clients = [{ id: 'x', name: 'Edge' }]
+  const profiles = { x: { engagement_start: '2026-09-16' } }
+  // 29 days (15 Oct) shows as 1.0 mo, so month 1; 28 days (14 Oct) shows as 0.9 mo, still under 1 month.
+  assert.equal(incubatorRoster({ clients, profiles, today: '2026-10-15' }).members[0].band, 1)
+  assert.equal(incubatorRoster({ clients, profiles, today: '2026-10-14' }).members[0].band, 0)
+  assert.deepEqual(incubatorRoster({ clients, profiles: { x: { engagement_start: '2026-10-17' } }, today: '2026-10-16' }).upcoming.map(e => e.client.id), ['x'])
+  const tasks = [{ task_id: 't', name: 'Due 15 Oct', status: 'in progress', due_date: '2026-10-15' }]
+  assert.equal(taskProgress(tasks, '2026-10-15').delayed.length, 0)
+  assert.equal(taskProgress(tasks, '2026-10-16').delayed.length, 1)
+})
+
 test('a client with a start date after today is upcoming, not undated', () => {
   const clients = [{ id: 'f', name: 'Future' }, { id: 'n', name: 'No date' }, { id: 'm', name: 'Moved' }]
   const profiles = { f: { engagement_start: '2026-10-20' }, m: { engagement_start: '2026-11-02' } }

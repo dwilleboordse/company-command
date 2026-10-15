@@ -23,8 +23,11 @@ function tenureStage(band) {
 // Same month rule as the Churn Analysis cards (1.0–1.9 mo = month 1). A client_incubator row overrides it:
 // 'active' keeps a client in (moved in for extra support), 'graduated' takes them out. Without a row, a
 // client who finished month 3 stays listed one more month as "review overdue" so nobody leaves unreviewed.
+// `today` is a YYYY-MM-DD day key (the page passes the Dubai day, like the weekly checks) or a Date.
+const dayKey = today => typeof today === 'string' ? today : dateKey(today)
+
 export function incubatorRoster({ clients, profiles, memberships = [], today = new Date() }) {
-  const todayKey = dateKey(today)
+  const todayKey = dayKey(today)
   const byClient = new Map(memberships.map(row => [row.client_id, row]))
   const members = [], graduated = [], undated = [], upcoming = []
   for (const client of clients) {
@@ -111,7 +114,7 @@ export function isTaskDelayed(task, todayKey) {
 }
 
 export function taskProgress(tasks, today = new Date()) {
-  const todayKey = dateKey(today)
+  const todayKey = dayKey(today)
   const done = tasks.filter(isTaskDone).length
   const open = tasks.filter(task => !isTaskDone(task))
   const delayed = open.filter(task => isTaskDelayed(task, todayKey)).sort((a, b) => a.due_date.localeCompare(b.due_date) || a.name.localeCompare(b.name))
