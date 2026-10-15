@@ -337,6 +337,7 @@ export default function Incubator() {
     setNotice('')
     try {
       const { data, error } = await request().select()
+      if (isMissingTable(error)) { setNotice("This can't be saved yet: the incubator tables haven't been added to the database."); return false }
       if (error) { setNotice(error.message); return false }
       if (!data?.length) { setNotice('Nothing was saved. You may not have permission to change this, or it was already changed.'); return false }
       await load()
@@ -485,7 +486,7 @@ export default function Incubator() {
                                   <div className="card" style={{ padding: 14 }}>
                                     <SectionTitle icon={<GraduationCap size={13}/>} title="Ready to graduate?"/>
                                     <GraduationPanel member={member} saving={saving}
-                                      onGraduate={note => setMembership(id, 'graduated', note)} onRelease={() => release(id)}/>
+                                      onGraduate={note => setMembership(id, 'graduated', note || member.membership?.note)} onRelease={() => release(id)}/>
                                   </div>
                                 </div>
                               </td>
