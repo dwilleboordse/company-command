@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { buildTimeBuckets, getPeriodOptions, resolvePeriod } from '../lib/reportingPeriods'
 import { fetchAllRows } from '../lib/reportingData'
 import { analyzeChurnTenure, tenureBand, tenureMonths } from '../lib/churnTenure'
+import SectionBoundary from '../components/SectionBoundary'
 import {
   AlertTriangle,
   CalendarDays,
@@ -351,6 +352,42 @@ async function fetchChurnData() {
   }
 }
 
+// Its own component inside a SectionBoundary, so a problem here can never take down the rest of the page.
+function EarlyChurnCards({ clients, records, period }) {
+  // Same exits as the Analytics "When clients churn" chart: past clients whose end date falls in the period.
+  const tenure = useMemo(() => analyzeChurnTenure(clients, records, period), [clients, records, period])
+  const earlyChurn = useMemo(() => [0, 1, 2, 3].map(band => {
+    const exits = tenure.exits.filter(exit => tenureBand(exit.start, exit.end) === band)
+    return { band, exits, share: tenure.exits.length ? exits.length / tenure.exits.length * 100 : 0 }
+  }), [tenure.exits])
+  const monthsLabel = exit => {
+    const months = tenureMonths(exit.start, exit.end)
+    return months == null ? exit.name : `${exit.name} (${months.toFixed(1)} mo)`
+  }
+
+  return (
+    <div className="card" style={{ padding: 18, marginBottom: 24 }}>
+      <SectionHeader title="Early churn by partnership month"
+        subtitle={`Past clients by tenure when they left: under 1 month, or month 1, 2 or 3 · ${period.dateLabel}`}/>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 12 }}>
+        {earlyChurn.map(({ band, exits, share }) => (
+          <div key={band} title={exits.map(monthsLabel).join(', ') || 'No clients'}>
+            <MetricCard icon={<CalendarDays size={13}/>} label={band ? `Churned in month ${band}` : 'Left before 1 month'} value={exits.length}
+              color={exits.length ? 'var(--red)' : 'var(--text-primary)'}
+              detail={`Tenure ${band}.0–${band}.9 mo · ${tenure.exits.length
+                ? `${share.toFixed(1)}% of ${tenure.exits.length} dated exits`
+                : 'no dated exits in this period'}`}/>
+          </div>
+        ))}
+      </div>
+      <p style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 10 }}>
+        The month is the whole number of the tenure in the client table below, so 1.0–1.9 mo is month 1. Hover a card to see the clients.
+        {tenure.missingStartCount > 0 && ` ${tenure.missingStartCount} exits in this period have no start date and are not counted.`}
+      </p>
+    </div>
+  )
+}
+
 export default function ChurnAnalysis() {
   const { profile, isManagement } = useAuth()
   const [clients, setClients] = useState([])
@@ -529,13 +566,6 @@ export default function ChurnAnalysis() {
     }
   }, [clients, records, latestHealth, period])
 
-  // Same exits as the Analytics "When clients churn" chart: past clients whose end date falls in the period.
-  const tenure = useMemo(() => analyzeChurnTenure(clients, records, period), [clients, records, period])
-  const earlyChurn = useMemo(() => [0, 1, 2, 3].map(band => {
-    const exits = tenure.exits.filter(exit => tenureBand(exit.start, exit.end) === band)
-    return { band, exits, share: tenure.exits.length ? exits.length / tenure.exits.length * 100 : 0 }
-  }), [tenure.exits])
-
   const filteredClients = useMemo(() => clients.filter(client => {
     const status = statusOf(client)
     const record = records[client.id]
@@ -642,25 +672,9 @@ export default function ChurnAnalysis() {
                 color={metrics.atRiskClients.length ? 'var(--red)' : 'var(--green)'}/>
             </div>
 
-            <div className="card" style={{ padding: 18, marginBottom: 24 }}>
-              <SectionHeader title="Early churn by partnership month"
-                subtitle={`Past clients by tenure when they left: under 1 month, or month 1, 2 or 3 · ${period.dateLabel}`}/>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 12 }}>
-                {earlyChurn.map(({ band, exits, share }) => (
-                  <div key={band} title={exits.map(exit => `${exit.name} (${tenureMonths(exit.start, exit.end).toFixed(1)} mo)`).join(', ') || 'No clients'}>
-                    <MetricCard icon={<CalendarDays size={13}/>} label={band ? `Churned in month ${band}` : 'Left before 1 month'} value={exits.length}
-                      color={exits.length ? 'var(--red)' : 'var(--text-primary)'}
-                      detail={`Tenure ${band}.0–${band}.9 mo · ${tenure.exits.length
-                        ? `${share.toFixed(1)}% of ${tenure.exits.length} dated exits`
-                        : 'no dated exits in this period'}`}/>
-                  </div>
-                ))}
-              </div>
-              <p style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 10 }}>
-                The month is the whole number of the tenure in the client table below, so 1.0–1.9 mo is month 1. Hover a card to see the clients.
-                {tenure.missingStartCount > 0 && ` ${tenure.missingStartCount} exits in this period have no start date and are not counted.`}
-              </p>
-            </div>
+            <SectionBoundary name="Early churn cards">
+              <EarlyChurnCards clients={clients} records={records} period={period}/>
+            </SectionBoundary>
 
             {metrics.completeRecords < clients.length && (
               <div style={{
