@@ -1,0 +1,8 @@
+.q4 .client-observations{scroll-margin-top:24px}
+.q4 .client-observations table{min-width:830px}
+.q4 .client-observations td:first-child{min-width:140px}
+.q4 .client-observations td:last-child{min-width:230px;max-width:420px}
+.q4 .client-observation-form{border-top:2px solid var(--qpurple,#8d5bbf);padding-top:20px;margin-top:24px}
+.q4 .client-observations .metric{margin-bottom:16px}
+.q4 .client-observations .actions{align-items:flex-start}
+.q4 .client-observations dd{overflow-wrap:anywhere}
