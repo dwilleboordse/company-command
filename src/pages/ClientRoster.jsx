@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { guardClientFields } from '../lib/allocationAssignments'
 import { getRoleDiscipline } from '../lib/creativeStrategyRoles'
 import { formatCreatorTarget, packageFormValues, packagePayload, validateClientPackage } from '../lib/clientPackage'
+import { canSetEngagementEnd, engagementDateFormValues, engagementDatesChanged, engagementDatesPayload, validateEngagementDates } from '../lib/clientEngagementDates'
 import ClientPackageFields from '../components/ClientPackageFields'
 import { Plus, Search, Archive, Edit2, LayoutGrid, LayoutList } from 'lucide-react'
 
@@ -147,16 +148,76 @@ function ClientModal({ client, allMembers, onClose, onSave }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
+  // Start and end dates are kept on the client's Churn Analysis record, which only
+  // management can write. Ops can add clients; the date fields are hidden for them (Vanessa, 13 Oct).
+  const { isManagement, profile } = useAuth()
+  const canSetEnd = canSetEngagementEnd(client)
+  const editClientId = client?.id
+  const [dates, setDates] = useState(engagementDateFormValues(null))
+  const [dateRecord, setDateRecord] = useState(null)
+  const [datesReady, setDatesReady] = useState(!isEdit || !isManagement)
+  const [datesLoadFailed, setDatesLoadFailed] = useState(false)
+  const datesEditable = isManagement && datesReady && !datesLoadFailed
+  // Once the client row is saved, a retry after a failed date save must not insert
+  // the client again or re-run the stale edit guard.
+  const [savedClientId, setSavedClientId] = useState(null)
+
+  useEffect(() => {
+    if (!isEdit || !isManagement) return
+    let cancelled = false
+    supabase.from('client_churn_profiles')
+      .select('engagement_start,engagement_end')
+      .eq('client_id', editClientId)
+      .maybeSingle()
+      .then(({ data, error: loadError }) => {
+        if (cancelled) return
+        if (loadError) {
+          // Keep the rest of the form usable; the dates stay locked and are not saved.
+          setDatesLoadFailed(true)
+          setError('Could not load the client dates, so they are locked: ' + loadError.message)
+        } else {
+          setDateRecord(data)
+          setDates(engagementDateFormValues(data))
+        }
+        setDatesReady(true)
+      })
+    return () => { cancelled = true }
+  }, [isEdit, isManagement, editClientId])
+
   function toggleChannel(ch) {
     setForm(f=>({...f,channels:{...f.channels,[ch]:!f.channels[ch]}}))
   }
 
+  async function saveDates(clientId) {
+    if (!datesEditable) return
+    const hasNewDates = Boolean(dates.engagement_start || (canSetEnd && dates.engagement_end))
+    const needed = isEdit ? engagementDatesChanged(dateRecord, dates, { canSetEnd }) : hasNewDates
+    if (!needed) return
+    const { error: dateError } = await supabase.from('client_churn_profiles')
+      .upsert(engagementDatesPayload({ clientId, form: dates, canSetEnd, profileId: profile?.id }), { onConflict: 'client_id' })
+    if (dateError) throw new Error(`The client was saved, but the dates were not (${dateError.message}). Press the button again to retry the dates.`)
+  }
+
   async function handleSave() {
-    if (saving) return
-    const validationError = !form.name.trim() ? 'Enter a client name.' : validateClientPackage(form, { requirePackage: !isEdit })
+    if (saving || !datesReady) return
+    const validationError = !form.name.trim() ? 'Enter a client name.'
+      : validateClientPackage(form, { requirePackage: !isEdit })
+        || (datesEditable ? validateEngagementDates(dates, { canSetEnd }) : '')
     if (validationError) { setError(validationError); return }
     setError('')
     setSaving(true)
+    if (savedClientId) {
+      try {
+        await saveDates(savedClientId)
+        await onSave()
+        onClose()
+      } catch (saveError) {
+        setError('Save failed: ' + saveError.message)
+      } finally {
+        setSaving(false)
+      }
+      return
+    }
     // Build payload without updated_at (may not exist on all schemas)
     const payload = {
       name: form.name.trim(),
@@ -185,6 +246,8 @@ function ClientModal({ client, allMembers, onClose, onSave }) {
           await onSave()
           throw new Error('This client changed since you opened it, or you no longer have editing access. Your draft is still here. Close and reopen the client to load the latest assignments before trying again.')
         }
+        setSavedClientId(client.id)
+        await saveDates(client.id)
       } else {
         const {data:newClient, error: saveError} = await supabase.from('clients')
           .insert({...payload, is_active:true, is_archived:false}).select().single()
@@ -192,6 +255,8 @@ function ClientModal({ client, allMembers, onClose, onSave }) {
         if (!newClient?.id) throw new Error('The client could not be created. Please ask the CEO to check your client editing permissions.')
         // Client Health derives missing weekly reviews from the roster. Creating
         // a client must not create an unreviewed zero-score health observation.
+        setSavedClientId(newClient.id)
+        await saveDates(newClient.id)
       }
       await onSave()
       onClose()
@@ -213,6 +278,28 @@ function ClientModal({ client, allMembers, onClose, onSave }) {
           <label htmlFor="roster-client-name">Client Name *</label>
           <input id="roster-client-name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="e.g. Abriga" autoFocus required/>
         </div>
+
+        {isManagement && (<>
+        <div className="grid-2">
+          <div className="form-group">
+            <label htmlFor="roster-client-start">Start Date</label>
+            <input id="roster-client-start" type="date" value={dates.engagement_start}
+              disabled={!datesEditable}
+              onChange={e=>setDates({...dates,engagement_start:e.target.value})}/>
+          </div>
+          <div className="form-group">
+            <label htmlFor="roster-client-end">{canSetEnd ? 'End Date (paused on)' : 'End Date'}</label>
+            <input id="roster-client-end" type="date" value={canSetEnd ? dates.engagement_end : ''}
+              disabled={!datesEditable || !canSetEnd}
+              onChange={e=>setDates({...dates,engagement_end:e.target.value})}/>
+          </div>
+        </div>
+        <p style={{fontSize:11,color:'var(--text-muted)',margin:'-6px 0 12px'}}>
+          {canSetEnd
+            ? 'Same dates as Churn Analysis. Tenure stops on the end date; a paused client is not counted as churn.'
+            : 'Same dates as Churn Analysis. The end date is the day the client leaves, set once they are paused or leave.'}
+        </p>
+        </>)}
 
         <ClientPackageFields value={form} onChange={setForm} requirePackage={!isEdit} showConcepts/>
 
@@ -253,7 +340,7 @@ function ClientModal({ client, allMembers, onClose, onSave }) {
 
         {error && <p role="alert" style={{color:'var(--red)',fontSize:12,marginTop:12}}>{error}</p>}
         <div className="flex gap-2 mt-4">
-          <button className="btn btn-primary" onClick={handleSave} disabled={saving||!form.name.trim()}>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving||!datesReady||!form.name.trim()}>
             {saving?'Saving...':isEdit?'Save Changes':'Add Client'}
           </button>
           <button className="btn btn-ghost" onClick={onClose} disabled={saving}>Cancel</button>
