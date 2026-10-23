@@ -91,6 +91,7 @@ export function getOkrMeasurement(kr, { values = [], userId, personal = false, a
   const officialUsable = official !== null && (official !== 0 || Boolean(kr.current_value_recorded_at))
   const legacy = personal ? values
     .filter(row => row.key_result_id === kr.id && row.user_id === userId
+      && (row.segment == null || row.segment === '')
       && (!asOf || row.week_start <= asOf) && numeric(row.value) !== null)
     .sort((a, b) => String(b.week_start).localeCompare(String(a.week_start)))[0] : null
   const legacyValue = numeric(legacy?.value)

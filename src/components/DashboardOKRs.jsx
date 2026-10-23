@@ -95,13 +95,20 @@ export default function DashboardOKRs() {
           if (keyResults.error) throw keyResults.error
           if (keyResults.data.length) {
             const ids = keyResults.data.map(row => row.id)
+            const weeklyValues = select => fetchAllRows(() => supabase.from('kr_values').select(select)
+              .in('key_result_id', ids).eq('user_id', profile.id).lte('week_start', asOf)
+              .order('week_start', { ascending: false }).order('id'))
             ;[milestones, values] = await Promise.all([
               fetchAllRows(() => supabase.from('milestones').select('id,key_result_id,status,is_active')
                 .in('key_result_id', ids).eq('is_active', true).order('id')),
-              fetchAllRows(() => supabase.from('kr_values').select('id,key_result_id,user_id,value,week_start')
-                .in('key_result_id', ids).eq('user_id', profile.id).lte('week_start', asOf)
-                .order('week_start', { ascending: false }).order('id')),
+              weeklyValues('id,key_result_id,user_id,value,week_start,segment'),
             ])
+            if (!milestones.error && values.error) {
+              const message = `${values.error.message || ''} ${values.error.details || ''}`
+              const missingSegment = values.error.code === '42703' || values.error.code === 'PGRST204'
+                || (/segment/i.test(message) && /does not exist|schema cache/i.test(message))
+              if (missingSegment) values = await weeklyValues('id,key_result_id,user_id,value,week_start')
+            }
             if (milestones.error) throw milestones.error
             if (values.error) throw values.error
           }

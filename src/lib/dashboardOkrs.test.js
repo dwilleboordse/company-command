@@ -76,6 +76,20 @@ test('confirmed official zero beats stale weekly values; legacy fallback is owne
   assert.equal(fallback.current, 30)
   assert.equal(fallback.valueDate, '2026-09-07')
   assert.equal(getOkrMeasurement({ id: 'kr', goal_value: 100 }, { ...options, personal: false }).current, null)
+  const withRoles = getOkrMeasurement({ id: 'kr', current_value: null, goal_value: 100 }, {
+    values: [
+      { key_result_id: 'kr', user_id: 'me', value: 4.5, week_start: '2026-10-05', segment: 'designer' },
+      { key_result_id: 'kr', user_id: 'me', value: 5, week_start: '2026-10-05', segment: 'video_editor' },
+      ...values,
+    ],
+    userId: 'me', personal: true, asOf: '2026-10-06',
+  })
+  assert.equal(withRoles.current, 90)
+  assert.equal(withRoles.valueDate, '2026-10-01')
+  assert.equal(getOkrMeasurement({ id: 'kr', current_value: null, goal_value: 100 }, {
+    values: [{ key_result_id: 'kr', user_id: 'me', value: 4.5, week_start: '2026-09-07', segment: 'designer' }],
+    userId: 'me', personal: true, asOf: '2026-10-01',
+  }).current, null)
 })
 
 test('min/zero/negative targets and missing measurements do not divide by zero', () => {
