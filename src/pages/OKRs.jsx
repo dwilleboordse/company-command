@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { getRoleDiscipline } from '../lib/creativeStrategyRoles'
 import { buildOkrCurrentValuePatch, okrCurrentValueInput } from '../lib/dashboardOkrs'
+import { roleStandards } from '../lib/roleKrValues'
 import { Plus, Edit2, Trash2, ChevronDown, ChevronRight, BookOpen, Target, CheckCircle2, Circle, AlertCircle } from 'lucide-react'
 
 const ROLE_LABELS = {
@@ -165,6 +166,7 @@ function KRModal({ objectiveId, existing, allMembers, onClose, onSave }) {
   const [saving,setSaving]=useState(false)
   const [saveError,setSaveError]=useState('')
   const [currentValueTouched,setCurrentValueTouched]=useState(false)
+  const roleMeasured = roleStandards(existing)
   async function handleSave() {
     if (saving) return
     if (!form.metric_name.trim() || String(form.goal_value).trim() === '' || !Number.isFinite(Number(form.goal_value))) {
@@ -173,7 +175,7 @@ function KRModal({ objectiveId, existing, allMembers, onClose, onSave }) {
     setSaving(true); setSaveError('')
     try {
       const p={title:form.title,metric_name:form.metric_name,goal_value:Number(form.goal_value),goal_direction:form.goal_direction,unit:form.unit,visibility:form.visibility,assignee_ids:form.assignee_ids,
-        ...buildOkrCurrentValuePatch(form.current_value, existing, { touched: currentValueTouched })}
+        ...(roleMeasured.length ? {} : buildOkrCurrentValuePatch(form.current_value, existing, { touched: currentValueTouched }))}
       const result = existing
         ? await supabase.from('key_results').update(p).eq('id',existing.id).select('id').single()
         : await supabase.from('key_results').insert({...p,objective_id:objectiveId}).select('id').single()
@@ -199,10 +201,12 @@ function KRModal({ objectiveId, existing, allMembers, onClose, onSave }) {
             <input type="number" value={form.goal_value} onChange={e=>setForm({...form,goal_value:e.target.value})}/>
           </div>
           <div className="form-group"><label htmlFor="okr-current-value">Current Value</label>
+            {roleMeasured.length ? <p id="okr-current-value" style={{fontSize:12,color:'var(--text-secondary)',lineHeight:1.5,marginTop:6}}>Recorded by role on Q4 → Departments ({roleMeasured.map(role => `${role.label} standard ${role.standard}`).join(', ')}). Saving this definition does not change those measured values.</p> : <>
             <input id="okr-current-value" type="number" step="any" value={form.current_value} onChange={e=>{setCurrentValueTouched(true);setForm({...form,current_value:e.target.value})}} placeholder="Enter measured value"/>
             <p style={{fontSize:11,color:'var(--text-muted)',lineHeight:1.5,marginTop:5}}>{existing?.current_value != null && Number(existing.current_value) === 0 && !existing.current_value_recorded_at
               ? 'Saved 0 is not yet confirmed. Enter 0 again if that is the measured result; leave blank to keep it unconfirmed.'
               : existing ? 'Enter a measured result, including 0. Leaving this blank keeps the saved value.' : 'Optional. Leave blank if not measured yet; enter 0 only when confirmed.'}</p>
+            </>}
           </div>
         </div>
         <div className="grid-2">
