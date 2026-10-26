@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { HEALTH_CONFIG, healthCurrentWeek, healthDueWeek, healthEligibleEntities, healthScore, healthTrend, healthWeekOptions, healthWeekSummary, isHealthComplete, isHealthDate, isHealthMonday } from './healthWeekly.js'
+import { HEALTH_CONFIG, ROLE_FIELDS_FROM_WEEK, healthCurrentWeek, healthDimensions, healthDueWeek, healthEligibleEntities, healthFieldsFor, healthScore, healthTrend, healthWeekOptions, healthWeekSummary, isHealthComplete, isHealthDate, isHealthMonday, usesRoleFields } from './healthWeekly.js'
 
 const review = (kind, values = {}) => ({ ...Object.fromEntries(HEALTH_CONFIG[kind].fields.map(field => [field.key, 4])), [HEALTH_CONFIG[kind].riskKey]: 'Low', ...values })
 test('health due week rolls over at Monday midnight Dubai across years and UTC dates', () => {
@@ -50,4 +50,40 @@ test('week choices keep stored dates, reject invalid dates, and include new unlo
   assert.equal(isHealthMonday('2026-04-05'), false)
   assert.equal(isHealthDate('2026-02-31'), false)
   assert.equal(isHealthDate('not-a-date'), false)
+})
+test('designers and editors score quality and speed from the switch week; other roles and older reviews keep the original categories', () => {
+  const designer = { id: 'd', position: 'designer' }
+  const editor = { id: 'e', position: 'editor' }
+  const strategist = { id: 's', position: 'creative_strategist' }
+  const defaults = HEALTH_CONFIG.team.fields
+  assert.equal(isHealthMonday(ROLE_FIELDS_FROM_WEEK), true)
+  assert.deepEqual(healthFieldsFor('team', designer, ROLE_FIELDS_FROM_WEEK).map(field => field.label), ['Output Quality', 'Output Speed', ...defaults.slice(2).map(field => field.label)])
+  assert.deepEqual(healthFieldsFor('team', editor, '2026-11-02').map(field => field.key), defaults.map(field => field.key))
+  assert.equal(healthFieldsFor('team', designer, '2026-10-12'), defaults)
+  assert.equal(healthFieldsFor('team', designer, '2026-10-18'), defaults)
+  assert.equal(healthFieldsFor('team', strategist, '2026-11-02'), defaults)
+  assert.equal(healthFieldsFor('team', undefined, '2026-11-02'), defaults)
+  assert.equal(healthFieldsFor('team', designer, undefined), defaults)
+  assert.equal(healthFieldsFor('client', { position: 'designer' }, '2026-11-02'), HEALTH_CONFIG.client.fields)
+  assert.equal(usesRoleFields('team', editor, '2026-10-19'), true)
+  assert.equal(usesRoleFields('team', editor, '2026-10-18'), false)
+  assert.equal(usesRoleFields('team', editor, 'not-a-date'), false)
+})
+test('category averages keep a speed score apart from client relationship', () => {
+  const entities = [{ id: 'd', position: 'designer' }, { id: 's', position: 'creative_strategist' }]
+  const rows = [
+    review('team', { reviewee_id: 'd', week_start: '2026-10-19', client_relationship: 2, output_quality: 3 }),
+    review('team', { reviewee_id: 'd', week_start: '2026-10-12', client_relationship: 5 }),
+    review('team', { reviewee_id: 's', week_start: '2026-10-19', client_relationship: 3 }),
+    review('team', { reviewee_id: 's', week_start: '2026-10-26', client_relationship: 0 }),
+  ]
+  const dims = healthDimensions('team', entities, rows)
+  assert.deepEqual(dims.map(dim => dim.name), ['Output', 'Quality', 'Client', 'Speed', 'Response', 'Team', 'Initiative', 'Reliability'])
+  const value = Object.fromEntries(dims.map(dim => [dim.name, dim.value]))
+  assert.equal(value.Output, 4)
+  assert.equal(value.Quality, 3)
+  assert.equal(value.Client, 4)
+  assert.equal(value.Speed, 2)
+  assert.deepEqual(healthDimensions('team', entities, []).map(dim => dim.value), [null, null, null, null, null, null])
+  assert.deepEqual(healthDimensions('client', [{ id: 'c' }], [review('client', { client_id: 'c', week_start: '2026-10-19' })]).map(dim => dim.name), HEALTH_CONFIG.client.fields.map(field => field.short))
 })

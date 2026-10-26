@@ -4,7 +4,7 @@ import { CheckCircle2, ChevronDown, ChevronUp, ClipboardList, Clock3, RefreshCw,
 import { useAuth } from '../contexts/AuthContext'
 import HealthAnalytics from '../components/HealthAnalytics'
 import { fetchHealthData, saveHealthEntry } from '../lib/healthData'
-import { HEALTH_CONFIG, healthCurrentWeek, healthDueWeek, healthEligibleEntities, healthScore, healthWeekOptions, healthWeekSummary, isHealthComplete, isHealthEntityActive } from '../lib/healthWeekly'
+import { HEALTH_CONFIG, ROLE_FIELDS_FROM_WEEK, ROLE_FIELD_OVERRIDES, healthCurrentWeek, healthDueWeek, healthEligibleEntities, healthFieldsFor, healthScore, healthWeekOptions, healthWeekSummary, isHealthComplete, isHealthEntityActive, usesRoleFields } from '../lib/healthWeekly'
 import './TeamHealth.css'
 
 const CONFIG = HEALTH_CONFIG.team
@@ -32,8 +32,8 @@ function RiskBadge({ risk }) {
   return risk ? <span className="team-health-risk" style={{ color: RISK_COLORS[risk] || 'var(--text-secondary)' }}>{risk} risk</span> : <span className="team-health-muted">Risk not recorded</span>
 }
 
-function ScoreBreakdown({ entry }) {
-  return <dl className="team-health-scores">{CONFIG.fields.map(field => {
+function ScoreBreakdown({ entry, member }) {
+  return <dl className="team-health-scores">{healthFieldsFor('team', member, entry?.week_start).map(field => {
     const value = Number(entry?.[field.key])
     const valid = Number.isFinite(value) && value >= 1 && value <= 5
     return <div key={field.key}><dt>{field.short || field.label}</dt><dd>{valid ? `${value} / 5` : 'Not scored'}</dd></div>
@@ -49,6 +49,7 @@ function ReviewText({ entry }) {
 
 function ReviewModal({ member, week, existing, previous, onClose, onSaved }) {
   const { profile } = useAuth()
+  const fields = healthFieldsFor('team', member, week)
   const [form, setForm] = useState(() => ({
     ...Object.fromEntries(CONFIG.fields.map(field => [field.key, existing?.[field.key] ?? ''])),
     [CONFIG.riskKey]: existing?.[CONFIG.riskKey] ?? '', notes: existing?.notes ?? '', actions: existing?.actions ?? '',
@@ -105,11 +106,12 @@ function ReviewModal({ member, week, existing, previous, onClose, onSaved }) {
     <section className="modal team-health-modal" role="dialog" aria-modal="true" aria-labelledby="team-review-title" aria-describedby="team-review-week" tabIndex={-1} ref={dialogRef}>
       <div className="team-health-modal-heading"><div><h2 className="modal-title" id="team-review-title">{existing ? 'Edit' : 'Log'} review · {member.full_name}</h2><p id="team-review-week">{weekLabel(week)} · {formatPosition(member.position)}</p></div><button type="button" className="btn btn-ghost btn-icon" aria-label="Close review" onClick={onClose} disabled={saving}><X size={18} /></button></div>
       <div className="team-health-period-note"><Clock3 size={16} aria-hidden="true" /><span>{existing ? `Updating the saved record dated ${dateLabel(existing.week_start)}. No other week will be changed.` : `This is a new, blank review for the week starting ${dateLabel(week)}. Previous scores are not carried forward.`}</span></div>
-      {previous && <details className="team-health-previous"><summary>Previous logged review · {weekLabel(previous.week_start)} · reference only</summary><div><p><strong>{scoreLabel(previous)}</strong> · {previous[CONFIG.riskKey] || 'Risk not recorded'}</p><ScoreBreakdown entry={previous} /><ReviewText entry={previous} /></div></details>}
+      {previous && <details className="team-health-previous"><summary>Previous logged review · {weekLabel(previous.week_start)} · reference only</summary><div><p><strong>{scoreLabel(previous)}</strong> · {previous[CONFIG.riskKey] || 'Risk not recorded'}</p><ScoreBreakdown entry={previous} member={member} /><ReviewText entry={previous} /></div></details>}
       <form onSubmit={handleSave}>
         <fieldset className="team-health-form-fields" disabled={saving}>
           <p className="team-health-muted">Score each category: 1 = needs urgent attention, 5 = consistently strong. All scores and the risk level are required.</p>
-          {CONFIG.fields.map(field => <fieldset className="team-health-rating" key={field.key}>
+          {ROLE_FIELD_OVERRIDES.positions.includes(member.position) && <p className="team-health-muted">{usesRoleFields('team', member, week) ? `Designers and video editors score Output Quality and Output Speed from the week of ${dateLabel(ROLE_FIELDS_FROM_WEEK)}.` : `This review keeps the categories it was scored under. Designers and video editors score Output Quality and Output Speed from the week of ${dateLabel(ROLE_FIELDS_FROM_WEEK)}.`}</p>}
+          {fields.map(field => <fieldset className="team-health-rating" key={field.key}>
             <legend>{field.label} <span aria-hidden="true">*</span></legend>
             {field.desc && <p>{field.desc}</p>}
             <div className="team-health-rating-options">{[1, 2, 3, 4, 5].map(value => <label key={value} className={Number(form[field.key]) === value ? 'selected' : ''}><input type="radio" name={field.key} value={value} checked={Number(form[field.key]) === value} onChange={() => setForm(current => ({ ...current, [field.key]: value }))} required /><span>{value}</span></label>)}</div>
@@ -137,7 +139,7 @@ function WeeklyMember({ member, entry, previous, week, onEdit }) {
         {entry && <button className="btn btn-ghost btn-sm" aria-expanded={expanded} aria-label={`${expanded ? 'Hide' : 'Show'} review details for ${member.full_name}`} onClick={() => setExpanded(value => !value)}>{expanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}Details</button>}
       </div>
     </div>
-    {entry ? <ScoreBreakdown entry={entry} /> : <p className="team-health-no-entry">No review logged for {weekLabel(week).toLowerCase()}. {previous ? <>Last recorded: {dateLabel(previous.week_start)} · {scoreLabel(previous)} <span className="team-health-muted">(previous context, not this week’s score)</span></> : 'No previous review available.'}</p>}
+    {entry ? <ScoreBreakdown entry={entry} member={member} /> : <p className="team-health-no-entry">No review logged for {weekLabel(week).toLowerCase()}. {previous ? <>Last recorded: {dateLabel(previous.week_start)} · {scoreLabel(previous)} <span className="team-health-muted">(previous context, not this week’s score)</span></> : 'No previous review available.'}</p>}
     {expanded && entry && <div className="team-health-member-details"><ReviewText entry={entry} /><p className="team-health-muted">Recorded for {weekLabel(entry.week_start).toLowerCase()}. {entry.updated_at ? `Last saved ${new Date(entry.updated_at).toLocaleString('en-GB', { timeZone: 'Asia/Dubai' })} Dubai time.` : ''}</p></div>}
   </article>
 }
@@ -253,7 +255,7 @@ export default function TeamHealth() {
         {tab === 'weekly' ? <div className="team-health-members">{weeklyMembers.length ? weeklyMembers.map(member => <WeeklyMember key={`${member.id}:${selectedWeek}`} member={member} week={selectedWeek} entry={selectedByMember.get(member.id)} previous={(memberHistory.get(member.id) || []).find(entry => entry.week_start < selectedWeek)} onEdit={openReview} />) : <div className="card team-health-empty"><ClipboardList size={23} /><p>No team members match these filters.</p></div>}</div>
           : <div className="team-health-history-list"><p className="team-health-muted">{visibleHistory.length} saved review{visibleHistory.length === 1 ? '' : 's'} match this view.</p>{visibleHistory.length ? visibleHistory.map(entry => {
             const member = entitiesById.get(entry[CONFIG.idKey]) || unknownMember(entry[CONFIG.idKey])
-            return <article className="card team-health-history-entry" key={entry.id}><div className="team-health-member-heading"><div><h3>{member.full_name}</h3><p>{weekLabel(entry.week_start)} · {member.department || formatPosition(member.position)}{!isHealthEntityActive('team', member) ? ' · Historical member' : ''}</p></div><div className="team-health-member-actions"><span className={`team-health-completion ${completionOf(entry)}`}>{isHealthComplete('team', entry) ? 'Logged' : 'Incomplete record'}</span><RiskBadge risk={entry[CONFIG.riskKey]} /><strong>{scoreLabel(entry)}</strong><button className="btn btn-ghost btn-sm" onClick={() => openReview(member, entry, entry.week_start)}>Edit this record</button></div></div><ScoreBreakdown entry={entry} /><ReviewText entry={entry} /></article>
+            return <article className="card team-health-history-entry" key={entry.id}><div className="team-health-member-heading"><div><h3>{member.full_name}</h3><p>{weekLabel(entry.week_start)} · {member.department || formatPosition(member.position)}{!isHealthEntityActive('team', member) ? ' · Historical member' : ''}</p></div><div className="team-health-member-actions"><span className={`team-health-completion ${completionOf(entry)}`}>{isHealthComplete('team', entry) ? 'Logged' : 'Incomplete record'}</span><RiskBadge risk={entry[CONFIG.riskKey]} /><strong>{scoreLabel(entry)}</strong><button className="btn btn-ghost btn-sm" onClick={() => openReview(member, entry, entry.week_start)}>Edit this record</button></div></div><ScoreBreakdown entry={entry} member={member} /><ReviewText entry={entry} /></article>
           }) : <div className="card team-health-empty"><ClipboardList size={23} /><p>No saved reviews match this view. No historical reviews have been filled automatically.</p></div>}</div>}
       </>}
     </div>

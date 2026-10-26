@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { HEALTH_CONFIG, healthCurrentWeek, healthDueWeek, healthScore, healthShiftWeek, healthTrend, isHealthComplete, isHealthEntityActive, isHealthMonday } from '../lib/healthWeekly'
+import { HEALTH_CONFIG, healthCurrentWeek, healthDimensions, healthDueWeek, healthScore, healthShiftWeek, healthTrend, isHealthComplete, isHealthEntityActive, isHealthMonday } from '../lib/healthWeekly'
 import './HealthAnalytics.css'
 
 const displayDate = value => new Date(`${value}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
@@ -37,7 +37,7 @@ export default function HealthAnalytics({ kind, entities, entries }) {
   const average = complete.length ? complete.reduce((sum, row) => sum + healthScore(kind, row), 0) / complete.length : null
   const highRisk = complete.filter(row => config.risks.slice(2).includes(row[config.riskKey])).length
   const trend = healthTrend(kind, scopedRows, start, end)
-  const dimensions = config.fields.map(field => ({ name: field.short, value: complete.length ? complete.reduce((sum, row) => sum + Number(row[field.key]), 0) / complete.length : null }))
+  const dimensions = healthDimensions(kind, selectedEntities, complete)
   const legacy = scopedRows.filter(row => !isHealthMonday(row.week_start)).length
   const comparison = selectedEntities.map(entity => {
     const rows = complete.filter(row => row[config.idKey] === entity.id).sort((a, b) => b.week_start.localeCompare(a.week_start))
