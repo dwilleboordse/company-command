@@ -26,6 +26,45 @@ export const HEALTH_CONFIG = {
   },
 }
 
+// 24 Oct 2026 (Vanessa): designers and video editors score Output Quality and Output Speed as their first two
+// categories; every other role keeps Output Quality & Speed and Client Relationship. The scores stay in the same
+// two columns, so nothing changes in the database: for those two roles, from the week below on, output_quality
+// means quality alone and client_relationship holds the speed score. A review dated before that week keeps the
+// labels it was scored under, whoever opens it later.
+export const ROLE_FIELDS_FROM_WEEK = '2026-10-19'
+export const ROLE_FIELD_OVERRIDES = {
+  positions: ['designer', 'editor'],
+  fields: {
+    output_quality: { label: 'Output Quality', short: 'Quality', desc: 'Quality of the delivered work' },
+    client_relationship: { label: 'Output Speed', short: 'Speed', desc: 'Delivery speed on the assigned tasks' },
+  },
+}
+export function usesRoleFields(kind, entity, week) {
+  return kind === 'team' && ROLE_FIELD_OVERRIDES.positions.includes(entity?.position)
+    && isHealthDate(week) && week >= ROLE_FIELDS_FROM_WEEK
+}
+// The categories a given review is scored under: same keys and order as HEALTH_CONFIG, labels by role and week.
+export function healthFieldsFor(kind, entity, week) {
+  const fields = HEALTH_CONFIG[kind].fields
+  if (!usesRoleFields(kind, entity, week)) return fields
+  return fields.map(field => ROLE_FIELD_OVERRIDES.fields[field.key] ? { ...field, ...ROLE_FIELD_OVERRIDES.fields[field.key] } : field)
+}
+// Category averages over complete rows, grouped by the label each row was scored under, so a speed score is
+// never averaged into Client Relationship. Order: the default categories, each followed by the label that
+// replaces it for some roles.
+export function healthDimensions(kind, entities, rows) {
+  const config = HEALTH_CONFIG[kind]
+  const byId = new Map(entities.map(entity => [entity.id, entity]))
+  const order = config.fields.flatMap(field => [field.short, ...(kind === 'team' && ROLE_FIELD_OVERRIDES.fields[field.key] ? [ROLE_FIELD_OVERRIDES.fields[field.key].short] : [])])
+  const sums = new Map()
+  rows.filter(row => isHealthComplete(kind, row)).forEach(row => healthFieldsFor(kind, byId.get(row[config.idKey]), row.week_start).forEach(field => {
+    const current = sums.get(field.short) || { sum: 0, count: 0 }
+    sums.set(field.short, { sum: current.sum + Number(row[field.key]), count: current.count + 1 })
+  }))
+  if (!sums.size) return config.fields.map(field => ({ name: field.short, value: null }))
+  return order.filter(name => sums.has(name)).map(name => ({ name, value: sums.get(name).sum / sums.get(name).count }))
+}
+
 export function isHealthDate(value) {
   return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
     && !Number.isNaN(Date.parse(value)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value
