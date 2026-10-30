@@ -57,6 +57,13 @@ function CapacityBar({ utilization, status }) {
   )
 }
 
+// This person's share of creators to source per month, one target or all three (unset targets count 0).
+const CREATOR_TARGET_FIELDS = ['ugc_creators_per_month', 'seeding_creators_per_month', 'tribe_creators_per_month']
+function creatorTotal(assignments, field) {
+  const fields = field ? [field] : CREATOR_TARGET_FIELDS
+  return assignments.reduce((sum, item) => sum + fields.reduce((s, f) => s + Number(item[f] || 0), 0), 0)
+}
+
 function WorkloadClientBreakdown({ assignments, showConcepts, type, canDrag, onSelect, onDragStart, onDragEnd, onManage }) {
   const sortedAssignments = [...assignments].sort((a, b) => a.client_name_snapshot.localeCompare(b.client_name_snapshot))
   const showCreatorTargets = type === 'ugc_manager'
@@ -111,6 +118,16 @@ function WorkloadClientBreakdown({ assignments, showConcepts, type, canDrag, onS
             </tr>
           ))}
         </tbody>
+        {showCreatorTargets && (
+          <tfoot>
+            <tr>
+              <td>Total · {formatConcepts(creatorTotal(sortedAssignments))} tasks</td>
+              <td><strong>{formatConcepts(creatorTotal(sortedAssignments, 'ugc_creators_per_month'))}</strong></td>
+              <td><strong>{formatConcepts(creatorTotal(sortedAssignments, 'seeding_creators_per_month'))}</strong></td>
+              <td><strong>{formatConcepts(creatorTotal(sortedAssignments, 'tribe_creators_per_month'))}</strong></td>
+            </tr>
+          </tfoot>
+        )}
       </table>
       <p className="workload-target-note">{showCreatorTargets ? 'Monthly sourcing share, split equally between assigned UGC managers. Fractions are planning averages.' : 'This person’s concept workload, split equally within their role.'}</p>
     </div>
@@ -739,7 +756,7 @@ export default function DesignCSOverview() {
             <WorkloadSection title="Creative strategists" subtitle={`Healthy range: ${data.settings.cs_min_concepts}–${data.settings.cs_max_concepts} concepts per month. Client count remains visible as context.`} people={workloads.strategists} allocations={monthAllocations} type="creative_strategist" draggedRole={draggedRole} onDropClient={moveClient} onSelect={selectClientForMove} onDragStart={isLiveMonth && !assignmentSaving ? startClientDrag : undefined} onDragEnd={endClientDrag} onManage={manageClientTeam} assignmentMode={assignmentMode}/>
             <WorkloadSection title="Video editors" subtitle={`${data.settings.editor_daily_capacity} video concepts per working day · ${selectedMonthRecord?.working_days || 22} working days.`} people={workloads.editors} allocations={monthAllocations} type="editor" draggedRole={draggedRole} onDropClient={moveClient} onSelect={selectClientForMove} onDragStart={isLiveMonth && !assignmentSaving ? startClientDrag : undefined} onDragEnd={endClientDrag} onManage={manageClientTeam} assignmentMode={assignmentMode}/>
             <WorkloadSection title="Designers" subtitle={`${data.settings.designer_daily_capacity} static concepts per working day · two more concepts than editors.`} people={workloads.designers} allocations={monthAllocations} type="designer" draggedRole={draggedRole} onDropClient={moveClient} onSelect={selectClientForMove} onDragStart={isLiveMonth && !assignmentSaving ? startClientDrag : undefined} onDragEnd={endClientDrag} onManage={manageClientTeam} assignmentMode={assignmentMode}/>
-            <WorkloadSection title="UGC managers" subtitle={`${data.settings.ugc_max_clients} full-client equivalents per UGC manager. A client shared by two managers counts as 0.5 each.`} people={workloads.ugcManagers} allocations={monthAllocations} type="ugc_manager" draggedRole={draggedRole} onDropClient={moveClient} onSelect={selectClientForMove} onDragStart={isLiveMonth && !assignmentSaving ? startClientDrag : undefined} onDragEnd={endClientDrag} onManage={manageClientTeam} assignmentMode={assignmentMode}/>
+            <WorkloadSection title="UGC managers" subtitle={`${data.settings.ugc_max_clients} full-client equivalents per UGC manager. A client shared by two managers counts as 0.5 each. Tasks / month = the UGC, Seeding and Tribe creators to source across their clients (from the roster), shared clients split equally.`} people={workloads.ugcManagers} allocations={monthAllocations} type="ugc_manager" draggedRole={draggedRole} onDropClient={moveClient} onSelect={selectClientForMove} onDragStart={isLiveMonth && !assignmentSaving ? startClientDrag : undefined} onDragEnd={endClientDrag} onManage={manageClientTeam} assignmentMode={assignmentMode}/>
           </>
         )}
 

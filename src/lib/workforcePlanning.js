@@ -299,14 +299,19 @@ export function buildWorkloads({ allocations = [], people = [], settings = DEFAU
     const clientEquivalents = assigned.reduce((sum, item) => sum + item.workload_share, 0)
     const capacity = Number(person.max_clients || safeSettings.ugc_max_clients)
     const utilization = capacity ? (clientEquivalents / capacity) * 100 : 0
+    // Vanessa, 30 Oct 2026 Loom "Measuring UGC tasks by team member": the volume of tasks, not the client count.
+    // Tasks = the client's UGC + Seeding + Tribe creators to source per month, this person's share (unset targets count 0).
+    const creatorTasks = assigned.reduce((sum, item) =>
+      sum + Number(item.ugc_creators_per_month || 0) + Number(item.seeding_creators_per_month || 0) + Number(item.tribe_creators_per_month || 0), 0)
     return {
       ...person,
       clients,
       clientEquivalents,
+      creatorTasks,
       utilization: Math.round(utilization),
       status: standardStatus(utilization),
       assignments: assigned,
-      capacityLabel: `${formatWorkload(clientEquivalents)}/${formatWorkload(capacity)} client equivalents · ${clients} clients`,
+      capacityLabel: `${formatWorkload(creatorTasks)} tasks / month · ${formatWorkload(clientEquivalents)}/${formatWorkload(capacity)} clients`,
     }
   })
 

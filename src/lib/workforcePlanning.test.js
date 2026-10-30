@@ -273,6 +273,8 @@ function sharedFixture(count) {
   return { people: team, allocations: [allocation] }
 }
 
+// The same number formatting as capacityLabel (lib formatWorkload is not exported).
+const formatLabel = value => Number(value).toLocaleString('en-US', { maximumFractionDigits: 1 })
 function closeTo(actual, expected) {
   assert.ok(Math.abs(actual - expected) < 1e-10, `Expected ${actual} to equal ${expected} without display rounding`)
 }
@@ -317,10 +319,13 @@ for (const count of [2, 3]) {
       assert.equal(person.assignments[0].ugc_creators_per_month, 5 / count)
       assert.equal(person.assignments[0].seeding_creators_per_month, 7 / count)
       assert.equal(person.assignments[0].tribe_creators_per_month, 9 / count)
+      closeTo(person.creatorTasks, (5 + 7 + 9) / count)
+      assert.equal(person.capacityLabel, `${formatLabel((5 + 7 + 9) / count)} tasks / month · ${formatLabel(1 / count)}/8 clients`)
     }
     closeTo(result.ugcManagers.reduce((sum, person) => sum + person.assignments[0].ugc_creators_per_month, 0), 5)
     closeTo(result.ugcManagers.reduce((sum, person) => sum + person.assignments[0].seeding_creators_per_month, 0), 7)
     closeTo(result.ugcManagers.reduce((sum, person) => sum + person.assignments[0].tribe_creators_per_month, 0), 9)
+    closeTo(result.ugcManagers.reduce((sum, person) => sum + person.creatorTasks, 0), 21)
   })
 }
 
@@ -390,6 +395,7 @@ test('UGC unknown creator targets remain unknown and explicit zeros remain zero 
     assert.equal(person.assignments[0].ugc_creators_per_month, null)
     assert.equal(person.assignments[0].seeding_creators_per_month, 0)
     assert.equal(person.assignments[0].tribe_creators_per_month, null)
+    assert.equal(person.creatorTasks, 0) // unset targets add nothing, an explicit zero is zero
   }
   delete fixture.allocations[0].ugc_creators_per_month
   assert.equal(buildWorkloads(fixture).ugcManagers[0].assignments[0].ugc_creators_per_month, null)
