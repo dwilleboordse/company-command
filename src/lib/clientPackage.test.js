@@ -22,17 +22,21 @@ test('editing creator targets preserves existing concepts, variations, and unkno
     },
     ugc_creators_per_month: 4,
     seeding_creators_per_month: null,
+    tribe_creators_per_month: 3,
   })
   const before = structuredClone(original)
   const form = packageFormValues(original)
+  assert.equal(form.tribe_creators_per_month, 3)
   form.ugc_creators_per_month = '8'
   form.seeding_creators_per_month = '12'
+  form.tribe_creators_per_month = '6'
   const saved = packagePayload(form)
 
   assert.deepEqual(saved.creatives, original.creatives)
   assert.equal(saved.package_type, original.package_type)
   assert.equal(saved.ugc_creators_per_month, 8)
   assert.equal(saved.seeding_creators_per_month, 12)
+  assert.equal(saved.tribe_creators_per_month, 6)
   assert.deepEqual(original, before)
 })
 
@@ -68,15 +72,18 @@ test('blank creator targets remain unknown while explicit zero remains zero', ()
   const legacyForm = packageFormValues({ creatives: { static: { concepts: 10, variations: 3 } } })
   assert.equal(legacyForm.ugc_creators_per_month, '')
   assert.equal(legacyForm.seeding_creators_per_month, '')
+  assert.equal(legacyForm.tribe_creators_per_month, '')
 
   for (const blank of [undefined, null, '', '   ']) {
-    const saved = packagePayload({ ...legacyForm, ugc_creators_per_month: blank, seeding_creators_per_month: blank })
+    const saved = packagePayload({ ...legacyForm, ugc_creators_per_month: blank, seeding_creators_per_month: blank, tribe_creators_per_month: blank })
     assert.equal(saved.ugc_creators_per_month, null)
     assert.equal(saved.seeding_creators_per_month, null)
+    assert.equal(saved.tribe_creators_per_month, null)
   }
-  const zeros = packagePayload({ ...legacyForm, ugc_creators_per_month: '0', seeding_creators_per_month: 0 })
+  const zeros = packagePayload({ ...legacyForm, ugc_creators_per_month: '0', seeding_creators_per_month: 0, tribe_creators_per_month: '0' })
   assert.equal(zeros.ugc_creators_per_month, 0)
   assert.equal(zeros.seeding_creators_per_month, 0)
+  assert.equal(zeros.tribe_creators_per_month, 0)
   assert.equal(packageFormValues(zeros).ugc_creators_per_month, 0)
   assert.equal(formatCreatorTarget(null), 'Not set')
   assert.equal(formatCreatorTarget(undefined), 'Not set')
@@ -85,8 +92,8 @@ test('blank creator targets remain unknown while explicit zero remains zero', ()
   assert.equal(formatCreatorTarget(12), '12')
 })
 
-test('both monthly sourcing targets accept nonnegative whole numbers within database range', () => {
-  for (const field of ['ugc_creators_per_month', 'seeding_creators_per_month']) {
+test('all monthly sourcing targets accept nonnegative whole numbers within database range', () => {
+  for (const field of ['ugc_creators_per_month', 'seeding_creators_per_month', 'tribe_creators_per_month']) {
     for (const input of [0, '0', 1, '12', ' 25 ', 2147483647]) {
       const form = { ...packageFormValues(), [field]: input }
       assert.equal(validateClientPackage(form), '', `${field}: ${input}`)
@@ -96,7 +103,7 @@ test('both monthly sourcing targets accept nonnegative whole numbers within data
 })
 
 test('invalid monthly sourcing targets cannot reach a save payload', () => {
-  for (const field of ['ugc_creators_per_month', 'seeding_creators_per_month']) {
+  for (const field of ['ugc_creators_per_month', 'seeding_creators_per_month', 'tribe_creators_per_month']) {
     for (const input of [-1, '-1', 0.5, '1.5', Infinity, -Infinity, 'Infinity', NaN, 'two', 2147483648]) {
       const form = { ...packageFormValues(), [field]: input }
       assert.match(validateClientPackage(form), /Monthly creator targets/, `${field}: ${input}`)
@@ -127,6 +134,7 @@ test('current roster package and sourcing targets flow into a stable monthly sna
     package_type: 'Video Remix + UGC',
     ugc_creators_per_month: 5,
     seeding_creators_per_month: 0,
+    tribe_creators_per_month: 7,
     creatives: { video: { concepts: 15, variations: 3 }, ugc: { concepts: 5, variations: 2 } },
   }
   const allocations = buildRosterAllocations({ clients: [client], monthStart: '2026-09-01' })
@@ -135,9 +143,11 @@ test('current roster package and sourcing targets flow into a stable monthly sna
   assert.equal(allocations[0].package_type, 'Video Remix + UGC')
   assert.equal(allocations[0].ugc_creators_per_month, 5)
   assert.equal(allocations[0].seeding_creators_per_month, 0)
+  assert.equal(allocations[0].tribe_creators_per_month, 7)
   assert.equal(snapshot[0].package_type, 'Video Remix + UGC')
   assert.equal(snapshot[0].ugc_creators_per_month, 5)
   assert.equal(snapshot[0].seeding_creators_per_month, 0)
+  assert.equal(snapshot[0].tribe_creators_per_month, 7)
   assert.equal(snapshot[0].videos, 20)
 
   client.package_type = 'New package'

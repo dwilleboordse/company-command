@@ -447,6 +447,7 @@ function ClientCard({ client, allMembers, onEdit, onArchive }) {
         <div style={{display:'flex',gap:16,flexWrap:'wrap',fontSize:12}}>
           <span>UGC: <strong>{formatCreatorTarget(client.ugc_creators_per_month)}</strong></span>
           <span>Seeding: <strong>{formatCreatorTarget(client.seeding_creators_per_month)}</strong></span>
+          <span>Tribe: <strong>{formatCreatorTarget(client.tribe_creators_per_month)}</strong></span>
         </div>
       </div>
 
@@ -513,6 +514,7 @@ function ClientTableRow({ client, allMembers, onEdit, onArchive }) {
       <td style={{fontSize:11,whiteSpace:'nowrap'}}>
         <div>UGC: {formatCreatorTarget(client.ugc_creators_per_month)}</div>
         <div>Seeding: {formatCreatorTarget(client.seeding_creators_per_month)}</div>
+        <div>Tribe: {formatCreatorTarget(client.tribe_creators_per_month)}</div>
       </td>
       {ROLE_GROUPS.map(rg=>{
         const ids = parseIds(client[rg.key])

@@ -110,6 +110,7 @@ export function buildRosterAllocations({ clients = [], people = [], monthStart =
         package_type: client.package_type || '',
         ugc_creators_per_month: client.ugc_creators_per_month ?? null,
         seeding_creators_per_month: client.seeding_creators_per_month ?? null,
+        tribe_creators_per_month: client.tribe_creators_per_month ?? null,
         strategist_key: primaryStrategistKey,
         strategist_keys: strategistKeys,
         strategist_profile_ids: strategistProfileIds,
@@ -139,6 +140,7 @@ export function buildAllocationSnapshot(allocations = []) {
     package_type: item.package_type ?? null,
     ugc_creators_per_month: item.ugc_creators_per_month ?? null,
     seeding_creators_per_month: item.seeding_creators_per_month ?? null,
+    tribe_creators_per_month: item.tribe_creators_per_month ?? null,
     strategist_key: item.strategist_key || null,
     strategist_keys: item.strategist_keys?.length
       ? [...item.strategist_keys]
@@ -214,6 +216,7 @@ function sharedAssignments(allocations, personKey, field, role) {
     if (role === 'ugc_manager') {
       assignment.ugc_creators_per_month = sharedCreatorTarget(item.ugc_creators_per_month, divisor)
       assignment.seeding_creators_per_month = sharedCreatorTarget(item.seeding_creators_per_month, divisor)
+      assignment.tribe_creators_per_month = sharedCreatorTarget(item.tribe_creators_per_month, divisor)
     } else {
       assignment.statics = role === 'editor' ? 0 : workloadNumber(item.statics) / divisor
       assignment.videos = role === 'designer' ? 0 : workloadNumber(item.videos) / divisor

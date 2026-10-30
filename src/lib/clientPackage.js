@@ -1,4 +1,4 @@
-export const CREATOR_TARGET_FIELDS = ['ugc_creators_per_month', 'seeding_creators_per_month']
+export const CREATOR_TARGET_FIELDS = ['ugc_creators_per_month', 'seeding_creators_per_month', 'tribe_creators_per_month']
 export const CREATIVE_TYPES = ['video', 'ugc', 'static']
 
 export function packageFormValues(client = {}) {
@@ -11,6 +11,7 @@ export function packageFormValues(client = {}) {
     creatives,
     ugc_creators_per_month: client.ugc_creators_per_month ?? '',
     seeding_creators_per_month: client.seeding_creators_per_month ?? '',
+    tribe_creators_per_month: client.tribe_creators_per_month ?? '',
   }
 }
 

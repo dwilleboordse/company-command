@@ -73,6 +73,7 @@ function WorkloadClientBreakdown({ assignments, showConcepts, type, canDrag, onS
             {showConcepts && <th>Video</th>}
             {showCreatorTargets && <th>UGC creators</th>}
             {showCreatorTargets && <th>Seeding creators</th>}
+            {showCreatorTargets && <th>Tribe creators</th>}
           </tr>
         </thead>
         <tbody>
@@ -106,6 +107,7 @@ function WorkloadClientBreakdown({ assignments, showConcepts, type, canDrag, onS
               {showConcepts && <td><strong>{formatConcepts(item.videos || 0)}</strong></td>}
               {showCreatorTargets && <td><strong>{formatSharedTarget(item.ugc_creators_per_month)}</strong></td>}
               {showCreatorTargets && <td><strong>{formatSharedTarget(item.seeding_creators_per_month)}</strong></td>}
+              {showCreatorTargets && <td><strong>{formatSharedTarget(item.tribe_creators_per_month)}</strong></td>}
             </tr>
           ))}
         </tbody>
@@ -199,7 +201,7 @@ function WorkloadSection({ title, subtitle, people, allocations, type, draggedRo
     if (type === 'creative_strategist') return !(item.strategist_keys?.length || item.strategist_key)
     if (type === 'editor') return Number(item.videos || 0) > 0 && !(item.editor_keys || []).length
     if (type === 'designer') return Number(item.statics || 0) > 0 && !(item.designer_keys || []).length
-    return (Number(item.ugc_concepts || 0) > 0 || Number(item.ugc_creators_per_month || 0) > 0 || Number(item.seeding_creators_per_month || 0) > 0) && !(item.ugc_manager_keys || []).length
+    return (Number(item.ugc_concepts || 0) > 0 || Number(item.ugc_creators_per_month || 0) > 0 || Number(item.seeding_creators_per_month || 0) > 0 || Number(item.tribe_creators_per_month || 0) > 0) && !(item.ugc_manager_keys || []).length
   }) : []
   return (
     <section className="planning-section">
@@ -307,7 +309,7 @@ function AllocationModal({ allocation, monthStart, clients, people, onClose, onS
     const detail = role === 'editor' ? `${formatConcepts(videos / count)} video concepts per person`
       : role === 'designer' ? `${formatConcepts(statics / count)} static concepts per person`
         : role === 'creative_strategist' ? `${formatConcepts((statics + videos) / count)} concepts per person`
-          : `${formatSharedTarget(form.ugc_creators_per_month === '' ? null : Number(form.ugc_creators_per_month) / count)} UGC / ${formatSharedTarget(form.seeding_creators_per_month === '' ? null : Number(form.seeding_creators_per_month) / count)} seeding creators per person`
+          : `${formatSharedTarget(form.ugc_creators_per_month === '' ? null : Number(form.ugc_creators_per_month) / count)} UGC / ${formatSharedTarget(form.seeding_creators_per_month === '' ? null : Number(form.seeding_creators_per_month) / count)} seeding / ${formatSharedTarget(form.tribe_creators_per_month === '' ? null : Number(form.tribe_creators_per_month) / count)} tribe creators per person`
     return equalShareSummary(count, detail)
   }
 
@@ -436,7 +438,7 @@ function AllocationTable({ allocations, peopleByKey, onEdit, isLive }) {
     <div className="card planning-table-card">
       <div className="table-wrap">
         <table className="planning-table planning-allocation-table">
-          <thead><tr><th>Client</th><th>Strategists</th><th>Concepts</th><th>UGC creators / month</th><th>Seeding creators / month</th><th>Designers</th><th>Editors</th><th>UGC managers</th><th></th></tr></thead>
+          <thead><tr><th>Client</th><th>Strategists</th><th>Concepts</th><th>UGC creators / month</th><th>Seeding creators / month</th><th>Tribe creators / month</th><th>Designers</th><th>Editors</th><th>UGC managers</th><th></th></tr></thead>
           <tbody>
             {allocations.map(item => {
               const strategistKeys = item.strategist_keys?.length ? item.strategist_keys : item.strategist_key ? [item.strategist_key] : []
@@ -451,6 +453,7 @@ function AllocationTable({ allocations, peopleByKey, onEdit, isLive }) {
                   <td><strong>{formatConcepts(Number(item.statics || 0) + Number(item.videos || 0))}</strong><span className="table-subline">{formatConcepts(item.statics)} static · {formatConcepts(item.videos)} video</span></td>
                   <td>{formatCreatorTarget(item.ugc_creators_per_month)}</td>
                   <td>{formatCreatorTarget(item.seeding_creators_per_month)}</td>
+                  <td>{formatCreatorTarget(item.tribe_creators_per_month)}</td>
                   <td>{designers || '—'}{parseIds(item.designer_keys).length > 1 && <span className="table-subline">{equalShareSummary(parseIds(item.designer_keys).length)}</span>}</td>
                   <td>{editors || '—'}{parseIds(item.editor_keys).length > 1 && <span className="table-subline">{equalShareSummary(parseIds(item.editor_keys).length)}</span>}</td>
                   <td>{ugc || '—'}{parseIds(item.ugc_manager_keys).length > 1 && <span className="table-subline">{equalShareSummary(parseIds(item.ugc_manager_keys).length)}</span>}</td>

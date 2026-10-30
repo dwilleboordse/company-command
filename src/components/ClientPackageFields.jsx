@@ -42,6 +42,7 @@ export default function ClientPackageFields({ value, onChange, requirePackage = 
         {[
           ['ugc_creators_per_month', 'UGC creators to source / month'],
           ['seeding_creators_per_month', 'Seeding creators to source / month'],
+          ['tribe_creators_per_month', 'Tribe creators to source / month'],
         ].map(([field, label]) => <label key={field} style={{ display: 'block', fontSize: 11 }}>
           {label}
           <input aria-label={label} type="number" min="0" step="1" max="2147483647" placeholder="Not set"

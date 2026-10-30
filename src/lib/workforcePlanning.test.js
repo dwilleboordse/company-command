@@ -223,6 +223,7 @@ test('month close snapshot preserves the live roster allocation without carrying
     package_type: null,
     ugc_creators_per_month: null,
     seeding_creators_per_month: null,
+    tribe_creators_per_month: null,
     strategist_key: 'cs-1',
     strategist_keys: ['cs-1', 'cs-2'],
     statics: 12,
@@ -264,6 +265,7 @@ function sharedFixture(count) {
     ugc_concepts: 5,
     ugc_creators_per_month: 5,
     seeding_creators_per_month: 7,
+    tribe_creators_per_month: 9,
   }
   for (const [role, field] of Object.entries(roleFields)) {
     allocation[field] = team.filter(person => person.discipline === role).map(person => person.source_key)
@@ -314,9 +316,11 @@ for (const count of [2, 3]) {
       assert.equal(person.utilization, Math.round(100 / (8 * count)))
       assert.equal(person.assignments[0].ugc_creators_per_month, 5 / count)
       assert.equal(person.assignments[0].seeding_creators_per_month, 7 / count)
+      assert.equal(person.assignments[0].tribe_creators_per_month, 9 / count)
     }
     closeTo(result.ugcManagers.reduce((sum, person) => sum + person.assignments[0].ugc_creators_per_month, 0), 5)
     closeTo(result.ugcManagers.reduce((sum, person) => sum + person.assignments[0].seeding_creators_per_month, 0), 7)
+    closeTo(result.ugcManagers.reduce((sum, person) => sum + person.assignments[0].tribe_creators_per_month, 0), 9)
   })
 }
 
@@ -380,13 +384,17 @@ test('UGC unknown creator targets remain unknown and explicit zeros remain zero 
   const fixture = sharedFixture(3)
   fixture.allocations[0].ugc_creators_per_month = null
   fixture.allocations[0].seeding_creators_per_month = 0
+  fixture.allocations[0].tribe_creators_per_month = null
   const result = buildWorkloads(fixture)
   for (const person of result.ugcManagers) {
     assert.equal(person.assignments[0].ugc_creators_per_month, null)
     assert.equal(person.assignments[0].seeding_creators_per_month, 0)
+    assert.equal(person.assignments[0].tribe_creators_per_month, null)
   }
   delete fixture.allocations[0].ugc_creators_per_month
   assert.equal(buildWorkloads(fixture).ugcManagers[0].assignments[0].ugc_creators_per_month, null)
+  delete fixture.allocations[0].tribe_creators_per_month
+  assert.equal(buildWorkloads(fixture).ugcManagers[0].assignments[0].tribe_creators_per_month, null)
 })
 
 test('UGC hiring totals and growth scenarios use shared client equivalents, not duplicated client counts', () => {
