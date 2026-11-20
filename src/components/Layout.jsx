@@ -6,7 +6,7 @@ import { useTheme } from '../contexts/ThemeContext'
 import HundredDayPlanReminder from './HundredDayPlanReminder'
 import { canUseCreativeLeadership } from '../lib/creativeLeadership'
 import { ACCESS_ROLE_LABELS } from '../lib/roleAccess'
-import { LayoutDashboard, Target, LogOut, Settings, TrendingUp, TrendingDown, Users, DollarSign, Menu, X, FileText, Trophy, Heart, UserCheck, Sun, Moon, ClipboardList, BarChart3, Compass, ShieldCheck, Network, BriefcaseBusiness, Sprout, Repeat, ExternalLink } from 'lucide-react'
+import { LayoutDashboard, Target, LogOut, Settings, TrendingUp, TrendingDown, Users, DollarSign, Menu, X, FileText, Trophy, Heart, UserCheck, Sun, Moon, ClipboardList, BarChart3, Compass, ShieldCheck, Network, BriefcaseBusiness, Sprout, Repeat, ExternalLink, UserMinus } from 'lucide-react'
 
 // Revision tracker (editor/designer revisions per task) runs as its own app on Vercel and asks for its own access key.
 const REVISION_TRACKER_URL = 'https://ddu-revision-tracker.vercel.app'
@@ -67,6 +67,7 @@ export default function Layout() {
               <p className="nav-section-label">Insights</p>
               <NavLink to="/analytics" className={nl}><BarChart3 size={16}/> Analytics</NavLink>
               <NavLink to="/churn-analysis" className={nl}><TrendingDown size={16}/> Churn Analysis</NavLink>
+              <NavLink to="/team-churn" className={nl}><UserMinus size={16}/> Team Churn</NavLink>
               <NavLink to="/incubator" className={nl}><Sprout size={16}/> Incubator</NavLink>
               <a href={REVISION_TRACKER_URL} target="_blank" rel="noopener noreferrer" className="nav-item" title="Opens in a new tab"><Repeat size={16}/> Revision Tracker <ExternalLink size={12} aria-hidden="true"/></a>
             </>
