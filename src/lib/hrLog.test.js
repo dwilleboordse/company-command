@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { EMPTY_ENTRY, entryDay, entryForm, entryPayload, filterEntries, optionList, validateEntry, yearsOf } from './hrLog.js'
+import { EMPTY_ENTRY, entryDay, entryForm, entryPayload, filterEntries, listedName, optionList, validateEntry, yearsOf } from './hrLog.js'
 
 // Made-up people and events only: this repository is public.
 const filled = { ...EMPTY_ENTRY, subject: 'Missed weekly call', team_member: 'Test Person', what_happened: 'Did not join the call.' }
@@ -66,6 +66,14 @@ test('filters by person, status, category, year and text, newest first', () => {
   assert.deepEqual(filterEntries(rows, { search: 'CLIENT' }).map(row => row.id), [2])
   assert.equal(entryDay({ created_at: null, incident_date: null }), '')
   assert.deepEqual(yearsOf(rows), ['2027', '2026'])
+})
+
+test('a name in other capitals or with spaces picks the listed spelling and filters the same person', () => {
+  const names = ['Test Person', 'Other Person']
+  assert.equal(listedName(names, ' test person '), 'Test Person')
+  assert.equal(listedName(names, 'New Person '), 'New Person', 'a name not listed yet is kept, trimmed')
+  assert.deepEqual(filterEntries(rows, { member: ' TEST PERSON ' }).map(row => row.id), [1, 3])
+  assert.deepEqual(filterEntries(rows, { member: '  ' }).map(row => row.id), [2, 1, 3], 'blank means everyone')
 })
 
 test('option lists keep the form defaults first and add what was typed before, once', () => {

@@ -90,13 +90,19 @@ export function optionList(defaults, entries, key) {
 export function filterEntries(entries, { search = '', member = '', status = '', category = '', year = '' } = {}) {
   const needle = clean(search).toLowerCase()
   return entries
-    .filter(entry => !member || clean(entry.team_member).toLowerCase() === member.toLowerCase())
+    .filter(entry => !clean(member) || clean(entry.team_member).toLowerCase() === clean(member).toLowerCase())
     .filter(entry => !status || entry.status === status)
     .filter(entry => !category || clean(entry.category).toLowerCase() === category.toLowerCase())
     .filter(entry => !year || entryDay(entry).startsWith(String(year)))
     .filter(entry => !needle || [entry.subject, entry.team_member, entry.what_happened, entry.topic_category, entry.agreements, entry.what_consequences]
       .some(text => clean(text).toLowerCase().includes(needle)))
     .sort((a, b) => entryDay(b).localeCompare(entryDay(a)) || String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')))
+}
+
+// The spelling the person filter lists for a name, so a name typed in other capitals selects the same entry.
+export function listedName(names, name) {
+  const key = clean(name).toLowerCase()
+  return names.find(listed => listed.toLowerCase() === key) ?? clean(name)
 }
 
 export function yearsOf(entries) {

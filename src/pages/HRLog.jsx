@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 import { fetchAllRows } from '../lib/reportingData'
 import {
   CATEGORY_OPTIONS, HR_LOG_TABLE, HR_STATUSES, SEVERITY_OPTIONS,
-  entryDay, entryForm, entryPayload, filterEntries, optionList, validateEntry, yearsOf,
+  entryDay, entryForm, entryPayload, filterEntries, listedName, optionList, validateEntry, yearsOf,
 } from '../lib/hrLog'
 
 const STATUS_BADGE = { Open: 'amber', Escalated: 'red', 'No Action': 'gray' }
@@ -258,7 +258,7 @@ export default function HRLog() {
                         <td style={{ whiteSpace: 'nowrap', fontSize: 12 }}>{fmtDay(entryDay(entry))}{!entry.incident_date && <div style={{ fontSize: 9, ...muted }}>day logged</div>}</td>
                         <td style={{ fontSize: 12 }}>
                           <button className="btn btn-ghost btn-sm" style={{ padding: 0, fontWeight: 700 }} title="Show only this person"
-                            onClick={event => { event.stopPropagation(); setFilter('member', entry.team_member) }}>{entry.team_member}</button>
+                            onClick={event => { event.stopPropagation(); setFilter('member', listedName(members, entry.team_member)) }}>{entry.team_member}</button>
                         </td>
                         <td style={{ fontSize: 12, maxWidth: 320 }}>
                           <div style={{ fontWeight: 650 }}>{entry.subject}</div>
