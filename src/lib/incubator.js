@@ -39,7 +39,10 @@ export function incubatorRoster({ clients, profiles, memberships = [], today = n
   const byClient = new Map(memberships.map(row => [row.client_id, row]))
   const members = [], graduated = [], failed = [], undated = [], upcoming = []
   for (const client of clients) {
-    if (client.is_active === false || client.is_archived) continue
+    // A decided client (graduated or failed) stays counted after it is set inactive or archived: a client
+    // that failed to graduate usually leaves, and the dropout count must not shrink when it does.
+    const decided = ['graduated', 'failed'].includes(byClient.get(client.id)?.status)
+    if (!decided && (client.is_active === false || client.is_archived)) continue
     // The Churn Analysis start date wins; the day the client was added to the CCC is the fallback.
     const churnStart = profiles[client.id]?.engagement_start || null
     const start = churnStart ?? addedDay(client.created_at)

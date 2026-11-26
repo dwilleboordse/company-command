@@ -33,6 +33,9 @@ function fmtStamp(iso) {
   return iso ? new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—'
 }
 
+// Newest first; the full list sits at the bottom of the page.
+const shortList = (names, max = 3) => names.length > max ? `${names.slice(0, max).join(', ')} +${names.length - max} more` : names.join(', ')
+
 function groupBy(rows, key = 'client_id') {
   return rows.reduce((groups, row) => { (groups[row[key]] ||= []).push(row); return groups }, {})
 }
@@ -412,7 +415,7 @@ export default function Incubator() {
               <MetricCard icon={<Users size={13}/>} label={`Check-in for ${fmtWeek(lastWeek)}`} value={`${members.length - missingCheck.length}/${members.length}`}
                 color={missingCheck.length ? 'var(--amber)' : 'var(--green)'} detail={missingCheck.length ? `Missing: ${missingCheck.map(member => member.client.name).join(', ')}` : 'All weekly checks logged'}/>
               <MetricCard icon={<XCircle size={13}/>} label="Failed to graduate" value={view.failed.length} color={view.failed.length ? 'var(--red)' : undefined}
-                detail={view.failed.length ? `${view.failed.map(entry => entry.client.name).join(', ')} · ${view.graduated.length} graduated` : `Left before graduating · ${view.graduated.length} graduated`}/>
+                detail={`${view.failed.length ? shortList(view.failed.map(entry => entry.client.name)) : 'Left before graduating'} · ${view.graduated.length} graduated`}/>
             </div>
 
             <AddClient options={view.addOptions} saving={saving} onAdd={(clientId, note) => setMembership(clientId, 'active', note)}/>

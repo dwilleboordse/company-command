@@ -45,6 +45,25 @@ test('a failed client leaves the incubator into its own list, newest decision fi
   assert.deepEqual(roster.members.map(row => row.client.id), ['d'])
 })
 
+test('a failed or graduated client stays counted after it is set inactive or archived', () => {
+  const clients = [
+    { id: 'left', name: 'left', is_active: false, created_at: '2026-01-01T00:00:00Z' },
+    { id: 'gone', name: 'gone', is_archived: true, created_at: '2026-01-01T00:00:00Z' },
+    { id: 'grad', name: 'grad', is_active: false, created_at: '2026-01-01T00:00:00Z' },
+    { id: 'kept', name: 'kept', is_active: false, created_at: '2026-01-01T00:00:00Z' },
+    { id: 'idle', name: 'idle', is_active: false, created_at: '2026-09-20T00:00:00Z' },
+  ]
+  const memberships = [
+    { client_id: 'left', status: 'failed' }, { client_id: 'gone', status: 'failed' },
+    { client_id: 'grad', status: 'graduated' }, { client_id: 'kept', status: 'active' },
+  ]
+  const roster = incubatorRoster({ clients, profiles: {}, memberships, today })
+  assert.deepEqual(roster.failed.map(row => row.client.id).sort(), ['gone', 'left'])
+  assert.deepEqual(roster.graduated.map(row => row.client.id), ['grad'])
+  assert.equal(roster.members.length, 0, 'an inactive client is not in the incubator, moved in or not')
+  assert.equal(roster.undated.length + roster.upcoming.length, 0)
+})
+
 test('without a Churn Analysis start date, the day the client was added to the CCC is used', () => {
   const clients = [
     { id: 'fresh', name: 'fresh', created_at: '2026-09-20T12:30:00.123+00:00' },
