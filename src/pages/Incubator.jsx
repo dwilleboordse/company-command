@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Circle, ExternalLink, GraduationCap,
-  HelpCircle, ListChecks, Plus, ShieldCheck, Sprout, Target, Trash2, Users,
+  HelpCircle, ListChecks, Plus, ShieldCheck, Sprout, Target, Trash2, Users, XCircle,
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import SectionBoundary from '../components/SectionBoundary'
@@ -44,7 +44,7 @@ const isMissingTable = error => ['PGRST205', '42P01'].includes(error?.code)
 
 async function loadIncubator() {
   const results = await Promise.all([
-    fetchAllRows(() => supabase.from('clients').select('id,name,is_active,is_archived').order('name').order('id')),
+    fetchAllRows(() => supabase.from('clients').select('id,name,is_active,is_archived,created_at').order('name').order('id')),
     fetchAllRows(() => supabase.from('client_churn_profiles').select('client_id,engagement_start').order('client_id')),
     fetchAllRows(() => supabase.from('client_health_entries').select('client_id,week_start,churn_risk,communication,notes').order('week_start', { ascending: false }).order('id')),
     fetchAllRows(() => supabase.from('spend_entries').select('client_id,week_start,ddu_spend,total_spend').order('week_start', { ascending: false }).order('id')),
@@ -246,7 +246,7 @@ function ActionsPanel({ actions, saving, onAdd, onToggle, onRemove }) {
   )
 }
 
-function GraduationPanel({ member, saving, onGraduate, onRelease }) {
+function GraduationPanel({ member, saving, onGraduate, onFail, onRelease }) {
   const [note, setNote] = useState('')
   const passed = member.checks.filter(check => check.pass === true).length
   return (
@@ -261,6 +261,8 @@ function GraduationPanel({ member, saving, onGraduate, onRelease }) {
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         <input value={note} onChange={event => setNote(event.target.value)} placeholder="Note for the decision (optional)" style={{ flex: '3 1 200px', fontSize: 11 }}/>
         <button className="btn btn-primary btn-sm" disabled={saving} onClick={() => onGraduate(note)}><GraduationCap size={12}/> Graduate to normal monitoring</button>
+        <button className="btn btn-ghost btn-sm" disabled={saving} onClick={() => onFail(note)} style={{ color: 'var(--red)' }}
+          title="The client left or is leaving before graduating. Counted under Failed to graduate."><XCircle size={12}/> Fail to graduate</button>
         {member.reason === 'manual' && <button className="btn btn-ghost btn-sm" disabled={saving} onClick={onRelease}>Take out of incubator</button>}
       </div>
     </>
@@ -359,9 +361,9 @@ export default function Incubator() {
     }
   }
   const stamp = () => ({ updated_by: profile?.id ?? null, updated_at: new Date().toISOString() })
-  // Moving a client back in clears an earlier graduation date.
+  // graduated_at holds the day of the decision, for a graduation and for a fail alike. Moving a client back in clears it.
   const setMembership = (clientId, status, note) => save(() => supabase.from('client_incubator')
-    .upsert({ client_id: clientId, status, note: note || null, graduated_at: status === 'graduated' ? new Date().toISOString() : null, ...stamp() }, { onConflict: 'client_id' }))
+    .upsert({ client_id: clientId, status, note: note || null, graduated_at: status === 'active' ? null : new Date().toISOString(), ...stamp() }, { onConflict: 'client_id' }))
   const release = clientId => save(() => supabase.from('client_incubator').delete().eq('client_id', clientId))
 
   if (!isManagement) {
@@ -409,6 +411,8 @@ export default function Incubator() {
                 detail="ClickUp, past due and not delivered"/>
               <MetricCard icon={<Users size={13}/>} label={`Check-in for ${fmtWeek(lastWeek)}`} value={`${members.length - missingCheck.length}/${members.length}`}
                 color={missingCheck.length ? 'var(--amber)' : 'var(--green)'} detail={missingCheck.length ? `Missing: ${missingCheck.map(member => member.client.name).join(', ')}` : 'All weekly checks logged'}/>
+              <MetricCard icon={<XCircle size={13}/>} label="Failed to graduate" value={view.failed.length} color={view.failed.length ? 'var(--red)' : undefined}
+                detail={view.failed.length ? `${view.failed.map(entry => entry.client.name).join(', ')} · ${view.graduated.length} graduated` : `Left before graduating · ${view.graduated.length} graduated`}/>
             </div>
 
             <AddClient options={view.addOptions} saving={saving} onAdd={(clientId, note) => setMembership(clientId, 'active', note)}/>
@@ -433,9 +437,9 @@ export default function Incubator() {
                             <td style={{ width: 24 }}>{open ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}</td>
                             <td>
                               <div style={{ fontWeight: 700, fontSize: 12 }}>{member.client.name}</div>
-                              <div style={{ fontSize: 10, ...muted }}>{!member.start ? 'No start date'
+                              <div style={{ fontSize: 10, ...muted }} title={member.startSource === 'added' ? 'No start date in Churn Analysis yet, so the day the client was added to the CCC is used. Add the real start date there to correct it.' : undefined}>{!member.start ? 'No start date'
                                 : member.tenure == null ? `Starts ${fmtWeek(member.start)} ${member.start.slice(0, 4)}`
-                                : `Started ${fmtWeek(member.start)} ${member.start.slice(0, 4)} · ${member.tenure.toFixed(1)} mo`}</div>
+                                : `${member.startSource === 'added' ? 'Added to CCC' : 'Started'} ${fmtWeek(member.start)} ${member.start.slice(0, 4)} · ${member.tenure.toFixed(1)} mo`}</div>
                               {member.membership?.note && <div style={{ fontSize: 10, color: 'var(--purple)' }}>{member.membership.note}</div>}
                             </td>
                             <td style={{ whiteSpace: 'nowrap', fontWeight: 650 }}>{member.notStarted ? 'Not started' : incubatorMonthLabel(member.band)}</td>
@@ -500,7 +504,8 @@ export default function Incubator() {
                                   <div className="card" style={{ padding: 14 }}>
                                     <SectionTitle icon={<GraduationCap size={13}/>} title="Ready to graduate?"/>
                                     <GraduationPanel member={member} saving={saving}
-                                      onGraduate={note => setMembership(id, 'graduated', note || member.membership?.note)} onRelease={() => release(id)}/>
+                                      onGraduate={note => setMembership(id, 'graduated', note || member.membership?.note)}
+                                      onFail={note => setMembership(id, 'failed', note || member.membership?.note)} onRelease={() => release(id)}/>
                                   </div>
                                 </div>
                                 </SectionBoundary>
@@ -517,11 +522,23 @@ export default function Incubator() {
 
             <p style={{ fontSize: 10, ...muted, marginBottom: 16 }}>
               Month uses the same rule as Churn Analysis: 1.0–1.9 mo is month 1. Clients in month 3 are due a graduation review and stay listed one more month as "review overdue" until someone decides.
+              A client without a start date in Churn Analysis counts from the day it was added to the CCC, so new clients join on their own.
               Week-over-week arrows compare with the previous logged week and name it when a week was skipped.
             </p>
 
-            {(view.graduated.length > 0 || view.undated.length > 0 || view.upcoming.length > 0) && (
+            {(view.graduated.length > 0 || view.failed.length > 0 || view.undated.length > 0 || view.upcoming.length > 0) && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: 14 }}>
+                {view.failed.length > 0 && (
+                  <div className="card" style={{ padding: 14 }}>
+                    <SectionTitle icon={<XCircle size={13}/>} title="Failed to graduate" detail="Left or leaving before graduating"/>
+                    {view.failed.map(entry => (
+                      <div key={entry.client.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 12, padding: '5px 0', borderBottom: '1px solid var(--border)' }}>
+                        <span><strong>{entry.client.name}</strong>{entry.membership?.graduated_at && <span style={{ fontSize: 10, ...muted }}> · {fmtStamp(entry.membership.graduated_at)}</span>}{entry.membership?.note && <span style={{ fontSize: 10, ...muted }}> · {entry.membership.note}</span>}</span>
+                        <button className="btn btn-ghost btn-sm" disabled={saving} onClick={() => release(entry.client.id)}>Undo</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {view.graduated.length > 0 && (
                   <div className="card" style={{ padding: 14 }}>
                     <SectionTitle icon={<GraduationCap size={13}/>} title="Graduated" detail="Monitored like normal clients"/>
@@ -535,7 +552,7 @@ export default function Incubator() {
                 )}
                 {view.undated.length > 0 && (
                   <div className="card" style={{ padding: 14 }}>
-                    <SectionTitle icon={<HelpCircle size={13}/>} title="Can't be placed" detail="No start date in Churn Analysis"/>
+                    <SectionTitle icon={<HelpCircle size={13}/>} title="Can't be placed" detail="No start date in Churn Analysis and no date added to the CCC"/>
                     <p style={{ fontSize: 11, ...muted }}>{view.undated.map(entry => entry.client.name).join(', ')}</p>
                     <p style={{ fontSize: 10, ...muted, marginTop: 6 }}>Add their start date in Churn Analysis, or move them in by hand above.</p>
                   </div>

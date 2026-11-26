@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { tenureBand, tenureMonths } from './churnTenure.js'
-import { graduationChecks, incubatorRoster, taskProgress, weeklyTimeline } from './incubator.js'
+import { addedDay, graduationChecks, incubatorRoster, taskProgress, weeklyTimeline } from './incubator.js'
 
 const today = new Date(2026, 9, 6)
 
@@ -29,6 +29,41 @@ test('the roster takes months 0–3, keeps month 4 as review overdue, and lets m
   ])
   assert.deepEqual(roster.graduated.map(row => row.client.id), ['done'])
   assert.deepEqual(roster.undated.map(row => row.client.id), ['nodate'])
+})
+
+test('a failed client leaves the incubator into its own list, newest decision first', () => {
+  const clients = ['a', 'b', 'c', 'd'].map(id => ({ id, name: id, created_at: '2026-01-01T00:00:00Z' }))
+  const profiles = Object.fromEntries(clients.map(client => [client.id, { engagement_start: '2026-08-01' }]))
+  const memberships = [
+    { client_id: 'a', status: 'failed', graduated_at: '2026-10-01T10:00:00Z' },
+    { client_id: 'b', status: 'failed', graduated_at: '2026-10-05T10:00:00Z' },
+    { client_id: 'c', status: 'graduated', graduated_at: '2026-10-03T10:00:00Z' },
+  ]
+  const roster = incubatorRoster({ clients, profiles, memberships, today })
+  assert.deepEqual(roster.failed.map(row => row.client.id), ['b', 'a'])
+  assert.deepEqual(roster.graduated.map(row => row.client.id), ['c'])
+  assert.deepEqual(roster.members.map(row => row.client.id), ['d'])
+})
+
+test('without a Churn Analysis start date, the day the client was added to the CCC is used', () => {
+  const clients = [
+    { id: 'fresh', name: 'fresh', created_at: '2026-09-20T12:30:00.123+00:00' },
+    { id: 'dated', name: 'dated', created_at: '2026-09-20T12:30:00Z' },
+    { id: 'old', name: 'old', created_at: '2025-04-07T08:00:00Z' },
+    { id: 'none', name: 'none', created_at: null },
+    { id: 'junk', name: 'junk', created_at: 'not a date' },
+    { id: 'empty', name: 'empty', created_at: '2026-09-20T00:00:00Z' },
+  ]
+  const profiles = { dated: { engagement_start: '2026-07-01' }, empty: { engagement_start: '' } }
+  const roster = incubatorRoster({ clients, profiles, today })
+  const byId = Object.fromEntries(roster.members.map(row => [row.client.id, row]))
+  assert.deepEqual([byId.fresh.start, byId.fresh.startSource, byId.fresh.band, byId.fresh.reason], ['2026-09-20', 'added', 0, 'new'])
+  assert.deepEqual([byId.dated.start, byId.dated.startSource, byId.dated.band], ['2026-07-01', 'churn', 3], 'the Churn Analysis date wins')
+  assert.deepEqual([byId.empty.start, byId.empty.startSource], ['2026-09-20', 'added'], 'an empty start date falls back too')
+  assert.equal(byId.old, undefined, 'a client added long ago is past the incubator, not undated')
+  assert.deepEqual(roster.undated.map(row => row.client.id), ['none', 'junk'])
+  assert.equal(addedDay('2026-02-30T00:00:00Z'), null)
+  assert.equal(addedDay(undefined), null)
 })
 
 test('the weekly timeline keeps gaps and legacy dates and compares with the previous logged week', () => {

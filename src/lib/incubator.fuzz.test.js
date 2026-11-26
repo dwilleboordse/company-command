@@ -21,11 +21,12 @@ const STATUSES = ['to do', 'in progress', 'needs edits', 'approved', 'sent to cl
 function randomData() {
   const clients = Array.from({ length: Math.floor(rnd() * 30) }, (_, i) => ({
     id: `c${i}`, name: `Client ${i}`, is_active: pick([true, true, false, null]), is_archived: pick([false, false, true, null]),
+    created_at: pick([`${day()}T10:00:00Z`, `${day()}T23:59:59.5+00:00`, null, undefined, '', 'bad']),
   }))
   const ids = [...clients.map(c => c.id), 'gone-1', 'gone-2']
   const profiles = Object.fromEntries(clients.filter(() => rnd() < 0.85).map(c => [c.id, { engagement_start: oddDay() }]))
   const memberships = ids.filter(() => rnd() < 0.25).map(id => ({
-    client_id: id, status: pick(['active', 'graduated', 'active']), note: maybe('reason'), graduated_at: maybe('2026-10-06T22:30:00Z', 0.5),
+    client_id: id, status: pick(['active', 'graduated', 'failed', 'active']), note: maybe('reason'), graduated_at: maybe('2026-10-06T22:30:00Z', 0.5),
   }))
   const health = Array.from({ length: Math.floor(rnd() * 60) }, () => ({
     client_id: pick(ids), week_start: day(2026), churn_risk: maybe(pick(['Low', 'Medium', 'High', 'Leaving', 'low', 'Unknown'])),
@@ -51,7 +52,7 @@ test('everything the Incubator page calculates survives 500 random data sets', (
     const today = pick(['2026-10-16', '2026-10-15', '2026-01-01', '2026-12-31', day(2026)])
     const lastWeek = pick(['2026-10-05', '2026-09-28', '2026-01-05'])
     const roster = incubatorRoster({ clients: data.clients, profiles: data.profiles, memberships: data.memberships, today })
-    const placed = roster.members.length + roster.graduated.length + roster.undated.length + roster.upcoming.length
+    const placed = roster.members.length + roster.graduated.length + roster.failed.length + roster.undated.length + roster.upcoming.length
     assert.ok(placed <= data.clients.length, 'no client is listed twice')
     const health = group(data.health), spend = group(data.spend), tasks = group(data.tasks)
     const goals = group(data.goals), actions = group(data.actions)

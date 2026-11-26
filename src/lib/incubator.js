@@ -21,24 +21,36 @@ function tenureStage(band) {
 }
 
 // Same month rule as the Churn Analysis cards (1.0–1.9 mo = month 1). A client_incubator row overrides it:
-// 'active' keeps a client in (moved in for extra support), 'graduated' takes them out. Without a row, a
-// client who finished month 3 stays listed one more month as "review overdue" so nobody leaves unreviewed.
+// 'active' keeps a client in (moved in for extra support), 'graduated' takes them out after a good review,
+// 'failed' takes them out because they left or are leaving before graduating. Without a row, a client who
+// finished month 3 stays listed one more month as "review overdue" so nobody leaves unreviewed.
 // `today` is a YYYY-MM-DD day key (the page passes the Dubai day, like the weekly checks) or a Date.
 const dayKey = today => typeof today === 'string' ? today : dateKey(today)
+
+// The day a client was added to the Command Center, from clients.created_at (the UTC day). New clients
+// rarely have a start date in Churn Analysis yet, so this stands in for it and they join on their own.
+export function addedDay(createdAt) {
+  const key = typeof createdAt === 'string' ? createdAt.slice(0, 10) : ''
+  return parseReportingDate(key) ? key : null
+}
 
 export function incubatorRoster({ clients, profiles, memberships = [], today = new Date() }) {
   const todayKey = dayKey(today)
   const byClient = new Map(memberships.map(row => [row.client_id, row]))
-  const members = [], graduated = [], undated = [], upcoming = []
+  const members = [], graduated = [], failed = [], undated = [], upcoming = []
   for (const client of clients) {
     if (client.is_active === false || client.is_archived) continue
-    const start = profiles[client.id]?.engagement_start ?? null
+    // The Churn Analysis start date wins; the day the client was added to the CCC is the fallback.
+    const churnStart = profiles[client.id]?.engagement_start || null
+    const start = churnStart ?? addedDay(client.created_at)
+    const startSource = churnStart ? 'churn' : start ? 'added' : null
     const band = tenureBand(start, todayKey)
     // A start date after today has no tenure yet: the client is signed but not started, not undated.
     const notStarted = start != null && band == null && parseReportingDate(start) > parseReportingDate(todayKey)
-    const entry = { client, start, band, notStarted, tenure: tenureMonths(start, todayKey), membership: byClient.get(client.id) ?? null }
+    const entry = { client, start, startSource, band, notStarted, tenure: tenureMonths(start, todayKey), membership: byClient.get(client.id) ?? null }
     const stage = tenureStage(band)
     if (entry.membership?.status === 'graduated') graduated.push(entry)
+    else if (entry.membership?.status === 'failed') failed.push(entry)
     else if (entry.membership?.status === 'active') members.push({ ...entry, reason: 'manual', stage: band != null && band <= INCUBATOR_LAST_MONTH ? stage : 'support' })
     else if (notStarted) upcoming.push(entry)
     else if (band == null) undated.push(entry)
@@ -47,7 +59,9 @@ export function incubatorRoster({ clients, profiles, memberships = [], today = n
   const order = { overdue: 0, review: 1, support: 2, active: 3 }
   members.sort((a, b) => order[a.stage] - order[b.stage] || (b.tenure ?? 0) - (a.tenure ?? 0) || a.client.name.localeCompare(b.client.name))
   upcoming.sort((a, b) => a.start.localeCompare(b.start))
-  return { members, graduated, undated, upcoming }
+  // Newest decision first, so the latest dropouts are on top.
+  failed.sort((a, b) => String(b.membership?.graduated_at ?? '').localeCompare(String(a.membership?.graduated_at ?? '')))
+  return { members, graduated, failed, undated, upcoming }
 }
 
 function shiftDays(key, days) {
