@@ -6,13 +6,15 @@ import { useTheme } from '../contexts/ThemeContext'
 import HundredDayPlanReminder from './HundredDayPlanReminder'
 import { canUseCreativeLeadership } from '../lib/creativeLeadership'
 import { ACCESS_ROLE_LABELS } from '../lib/roleAccess'
-import { LayoutDashboard, Target, LogOut, Settings, TrendingUp, TrendingDown, Users, DollarSign, Menu, X, FileText, Trophy, Heart, UserCheck, Sun, Moon, ClipboardList, BarChart3, Compass, ShieldCheck, Network, BriefcaseBusiness, Sprout, Repeat, ExternalLink, UserMinus } from 'lucide-react'
+import { LayoutDashboard, Target, LogOut, Settings, TrendingUp, TrendingDown, Users, DollarSign, Menu, X, FileText, Trophy, Heart, UserCheck, Sun, Moon, ClipboardList, BarChart3, Compass, ShieldCheck, Network, BriefcaseBusiness, Sprout, Repeat, ExternalLink, UserMinus, ShieldAlert } from 'lucide-react'
 
 // Revision tracker (editor/designer revisions per task) runs as its own app on Vercel and asks for its own access key.
 const REVISION_TRACKER_URL = 'https://ddu-revision-tracker.vercel.app'
 
 export default function Layout() {
   const { profile, signOut, hasFullAccess, isManagement, isOps } = useAuth()
+  // HR records: active CEO and management accounts only (not ops, not the AI engineer), like the database rule.
+  const canSeeHrLog = Boolean(profile && profile.is_active !== false && ['ceo', 'management'].includes(profile.role))
   const { theme, toggle } = useTheme()
   const navigate = useNavigate()
   const location = useLocation()
@@ -81,6 +83,7 @@ export default function Layout() {
               <NavLink to="/clients" className={nl}><Heart size={16}/> Client Health</NavLink>
               <p className="nav-section-label">Team</p>
               <NavLink to="/team-health" className={nl}><UserCheck size={16}/> Team Health</NavLink>
+              {canSeeHrLog && <NavLink to="/hr-log" className={nl}><ShieldAlert size={16}/> HR Log</NavLink>}
             </>
           )}
 
